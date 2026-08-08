@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">mdLite</string>
+    <string name="home_title">Markdown 文档</string>
+</resources>

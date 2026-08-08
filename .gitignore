@@ -1,0 +1,16 @@
+# Gradle
+.gradle/
+build/
+
+# Android Studio / IntelliJ
+*.iml
+.idea/
+local.properties
+.cxx/
+
+# macOS
+.DS_Store
+
+# Keystore
+*.jks
+*.keystore
