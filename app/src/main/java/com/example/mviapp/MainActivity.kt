@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.SdCard
@@ -46,10 +47,12 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.mviapp.core.navigation.AppNavHost
 import com.example.mviapp.core.navigation.Screen
+import com.example.mviapp.core.history.ReadingHistoryRepository
 import com.example.mviapp.core.ui.config.AppLayoutConfig
 import com.example.mviapp.core.ui.theme.MviAppTheme
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
+import javax.inject.Inject
 
 /**
  * 应用入口 Activity
@@ -59,6 +62,10 @@ import kotlinx.coroutines.launch
  */
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+
+    /** 批量导入时写入“最近阅读”历史 */
+    @Inject
+    lateinit var historyRepository: ReadingHistoryRepository
 
     /** 其他应用通过“打开方式”传入的待打开文件 URI（ACTION_VIEW） */
     private var pendingOpenUri by mutableStateOf<Uri?>(null)
@@ -120,6 +127,41 @@ class MainActivity : ComponentActivity() {
                             }
                         }
 
+                        // 批量导入：一次选择多个 md 文件，直接加入“最近阅读”
+                        val batchImportLauncher = rememberLauncherForActivityResult(
+                            contract = ActivityResultContracts.OpenMultipleDocuments(),
+                        ) { uris ->
+                            if (uris.isNotEmpty()) {
+                                scope.launch {
+                                    var imported = 0
+                                    uris.forEach { uri ->
+                                        val name = uri.displayName(context) ?: uri.fallbackName()
+                                        if (name.isMarkdownFile()) {
+                                            runCatching {
+                                                context.contentResolver.takePersistableUriPermission(
+                                                    uri,
+                                                    Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                                                        Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                                                )
+                                            }
+                                            historyRepository.add(title = name, source = uri.toString())
+                                            imported++
+                                        }
+                                    }
+                                    Toast.makeText(
+                                        context,
+                                        if (imported > 0) "已导入 $imported 个 md 文件" else "未选择 md 文件",
+                                        Toast.LENGTH_SHORT,
+                                    ).show()
+                                }
+                                // 重建首页，让新导入的文件立即显示
+                                navController.navigate(Screen.Home.route) {
+                                    popUpTo(Screen.Home.route) { inclusive = true }
+                                    launchSingleTop = true
+                                }
+                            }
+                        }
+
                         // 处理“打开方式”唤起的文件：授权后直接进入阅读页
                         val openUri = pendingOpenUri
                         LaunchedEffect(openUri) {
@@ -161,6 +203,10 @@ class MainActivity : ComponentActivity() {
                                         scope.launch { drawerState.close() }
                                         filePicker.launch(arrayOf("*/*"))
                                     },
+                                    onBatchImport = {
+                                        scope.launch { drawerState.close() }
+                                        batchImportLauncher.launch(arrayOf("*/*"))
+                                    },
                                 )
                             },
                         ) {
@@ -195,6 +241,7 @@ private fun AppDrawerContent(
     onHomeClick: () -> Unit,
     onSelectStorage: () -> Unit,
     onOpenFile: () -> Unit,
+    onBatchImport: () -> Unit,
 ) {
     ModalDrawerSheet {
         Column(
@@ -242,6 +289,13 @@ private fun AppDrawerContent(
             icon = { Icon(imageVector = Icons.Default.Description, contentDescription = null) },
             selected = false,
             onClick = onOpenFile,
+            modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
+        )
+        NavigationDrawerItem(
+            label = { Text("批量导入 md 文件") },
+            icon = { Icon(imageVector = Icons.Default.Add, contentDescription = null) },
+            selected = false,
+            onClick = onBatchImport,
             modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
         )
     }

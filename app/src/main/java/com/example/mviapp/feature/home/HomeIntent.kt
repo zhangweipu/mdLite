@@ -25,6 +25,9 @@ sealed interface HomeIntent : MviIntent {
     /** 删除一条阅读记录 */
     data class DeleteRecent(val source: String) : HomeIntent
 
+    /** 置顶/取消置顶一条阅读记录 */
+    data class TogglePin(val source: String) : HomeIntent
+
     /** 重命名显示名称（只改历史记录里的标题，不修改磁盘文件） */
     data class RenameTitle(
         val source: String,

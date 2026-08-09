@@ -20,6 +20,9 @@ interface ReadingHistoryRepository {
     /** 重命名记录（保留原阅读时间，来源同步更新） */
     suspend fun rename(source: String, newSource: String, newTitle: String)
 
+    /** 设置/取消置顶 */
+    suspend fun setPinned(source: String, pinned: Boolean)
+
     /** 删除指定来源的记录 */
     suspend fun remove(source: String)
 
@@ -44,8 +47,16 @@ class SharedPreferencesHistoryRepository @Inject constructor(
     private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     override suspend fun add(title: String, source: String) = withContext(Dispatchers.IO) {
+        val existing = readAll().firstOrNull { it.source == source }
         val updated = buildList {
-            add(ReadingRecord(title = title, source = source, readAt = System.currentTimeMillis()))
+            add(
+                ReadingRecord(
+                    title = title,
+                    source = source,
+                    readAt = System.currentTimeMillis(),
+                    pinned = existing?.pinned ?: false,
+                ),
+            )
             addAll(readAll().filter { it.source != source })
         }.take(MAX_RECORDS)
         prefs.edit()
@@ -63,6 +74,7 @@ class SharedPreferencesHistoryRepository @Inject constructor(
                         title = newTitle,
                         source = newSource,
                         readAt = existing?.readAt ?: System.currentTimeMillis(),
+                        pinned = existing?.pinned ?: false,
                     ),
                 )
                 addAll(all.filter { it.source != source && it.source != newSource })
@@ -70,10 +82,20 @@ class SharedPreferencesHistoryRepository @Inject constructor(
             saveAll(updated)
         }
 
+    override suspend fun setPinned(source: String, pinned: Boolean) = withContext(Dispatchers.IO) {
+        val updated = readAll().map { record ->
+            if (record.source == source) record.copy(pinned = pinned) else record
+        }
+        saveAll(updated)
+    }
+
     override suspend fun getRecent(limit: Int): List<ReadingRecord> = withContext(Dispatchers.IO) {
-        // 按阅读时间倒序，后阅读的排在前面
+        // 置顶优先，其余按阅读时间倒序
         readAll()
-            .sortedByDescending { it.readAt }
+            .sortedWith(
+                compareByDescending<ReadingRecord> { it.pinned }
+                    .thenByDescending { it.readAt },
+            )
             .take(limit)
     }
 

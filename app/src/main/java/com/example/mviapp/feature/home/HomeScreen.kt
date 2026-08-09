@@ -22,8 +22,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MenuBook
+import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
@@ -143,6 +145,9 @@ fun HomeScreen(
                     onDeleteRecent = { source ->
                         viewModel.dispatch(HomeIntent.DeleteRecent(source))
                     },
+                    onTogglePin = { source ->
+                        viewModel.dispatch(HomeIntent.TogglePin(source))
+                    },
                     onRenameFile = { source, title ->
                         if (source.startsWith("content://")) {
                             renameTarget = source to title
@@ -193,6 +198,7 @@ private fun SuccessView(
     onFileClick: (String, String) -> Unit,
     onRecentClick: (ReadingRecord) -> Unit,
     onDeleteRecent: (String) -> Unit,
+    onTogglePin: (String) -> Unit,
     onClearRecent: () -> Unit,
     onRenameFile: (String, String) -> Unit,
 ) {
@@ -221,6 +227,7 @@ private fun SuccessView(
                     dimens = dimens,
                     onClick = { onRecentClick(record) },
                     onLongClick = { onRenameFile(record.source, record.title) },
+                    onTogglePin = { onTogglePin(record.source) },
                     onDelete = { onDeleteRecent(record.source) },
                 )
             }
@@ -278,6 +285,7 @@ private fun RecentReadRow(
     dimens: AppDimens,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
+    onTogglePin: () -> Unit,
     onDelete: () -> Unit,
 ) {
     Card(
@@ -325,6 +333,17 @@ private fun RecentReadRow(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
+                )
+            }
+            IconButton(onClick = onTogglePin) {
+                Icon(
+                    imageVector = if (record.pinned) Icons.Filled.PushPin else Icons.Outlined.PushPin,
+                    contentDescription = if (record.pinned) "取消置顶" else "置顶",
+                    tint = if (record.pinned) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
                 )
             }
             IconButton(onClick = onDelete) {

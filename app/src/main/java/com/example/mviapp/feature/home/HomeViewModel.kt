@@ -40,6 +40,7 @@ class HomeViewModel @Inject constructor(
             is HomeIntent.RefreshSilent -> refreshSilently()
             is HomeIntent.ClickFile -> clickFile(intent.filePath, intent.title)
             is HomeIntent.DeleteRecent -> deleteRecent(intent.source)
+            is HomeIntent.TogglePin -> togglePin(intent.source)
             is HomeIntent.RenameTitle -> renameTitle(intent.source, intent.currentTitle, intent.newName)
             is HomeIntent.ClearRecent -> clearRecent()
             is HomeIntent.Retry -> loadItems()
@@ -120,6 +121,30 @@ class HomeViewModel @Inject constructor(
         updateState { state ->
             if (state is HomeState.Success) {
                 state.copy(recentReads = state.recentReads.filterNot { it.source == source })
+            } else {
+                state
+            }
+        }
+    }
+
+    /** 切换置顶状态：置顶记录优先展示 */
+    private suspend fun togglePin(source: String) {
+        val current = currentState
+        if (current !is HomeState.Success) return
+        val record = current.recentReads.firstOrNull { it.source == source } ?: return
+        val newPinned = !record.pinned
+        runCatching { historyRepository.setPinned(source, newPinned) }
+        updateState { state ->
+            if (state is HomeState.Success) {
+                val updated = state.recentReads.map { r ->
+                    if (r.source == source) r.copy(pinned = newPinned) else r
+                }
+                state.copy(
+                    recentReads = updated.sortedWith(
+                        compareByDescending<ReadingRecord> { it.pinned }
+                            .thenByDescending { it.readAt },
+                    ),
+                )
             } else {
                 state
             }
