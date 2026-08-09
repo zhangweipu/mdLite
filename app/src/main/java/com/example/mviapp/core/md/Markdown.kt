@@ -180,6 +180,32 @@ object MarkdownParser {
         return headings.filter { it.second == chapterLevel }.map { it.first }
     }
 
+    /** 生成块级元素的一行摘要文本（用于标记/书签的预览） */
+    fun blockPreview(block: MdBlock): String {
+        val text = when (block) {
+            is MdBlock.Heading -> inlinesText(block.content)
+            is MdBlock.Paragraph -> inlinesText(block.content)
+            is MdBlock.CodeBlock -> block.code.lineSequence().firstOrNull().orEmpty()
+            is MdBlock.Blockquote -> inlinesText(block.content)
+            is MdBlock.UnorderedList -> block.items.firstOrNull().let { inlinesText(it.orEmpty()) }
+            is MdBlock.OrderedList -> block.items.firstOrNull().let { inlinesText(it.orEmpty()) }
+            is MdBlock.Table -> block.header.joinToString(" | ") { inlinesText(it) }
+            MdBlock.HorizontalRule -> ""
+        }
+        return text.lineSequence().firstOrNull().orEmpty().trim().take(40)
+    }
+
+    private fun inlinesText(inlines: List<MdInline>): String =
+        inlines.joinToString("") { inline ->
+            when (inline) {
+                is MdInline.Plain -> inline.text
+                is MdInline.Bold -> inline.text
+                is MdInline.Italic -> inline.text
+                is MdInline.Code -> inline.text
+                is MdInline.Link -> inline.text
+            }
+        }
+
     // ==================== 行内解析 ====================
 
     private fun toInline(token: String): MdInline = when {

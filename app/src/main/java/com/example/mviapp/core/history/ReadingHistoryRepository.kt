@@ -23,6 +23,9 @@ interface ReadingHistoryRepository {
     /** 设置/取消置顶 */
     suspend fun setPinned(source: String, pinned: Boolean)
 
+    /** 查询某来源是否已置顶 */
+    suspend fun isPinned(source: String): Boolean
+
     /** 删除指定来源的记录 */
     suspend fun remove(source: String)
 
@@ -87,6 +90,10 @@ class SharedPreferencesHistoryRepository @Inject constructor(
             if (record.source == source) record.copy(pinned = pinned) else record
         }
         saveAll(updated)
+    }
+
+    override suspend fun isPinned(source: String): Boolean = withContext(Dispatchers.IO) {
+        readAll().firstOrNull { it.source == source }?.pinned ?: false
     }
 
     override suspend fun getRecent(limit: Int): List<ReadingRecord> = withContext(Dispatchers.IO) {

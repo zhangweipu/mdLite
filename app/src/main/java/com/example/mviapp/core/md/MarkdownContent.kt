@@ -1,7 +1,9 @@
 package com.example.mviapp.core.md
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -61,6 +63,8 @@ import com.example.mviapp.core.ui.config.LocalAppDimens
  * @param listState      外部传入的列表状态（用于保存/恢复滚动位置）
  * @param restoreIndex   恢复的滚动位置（块索引），<=0 表示不恢复
  * @param restoreOffset  恢复的滚动偏移
+ * @param highlights     已标记（高亮）的内容块索引
+ * @param onToggleHighlight 长按段落时回调（块索引 + 摘要文本）
  */
 @Composable
 fun MarkdownContent(
@@ -70,6 +74,8 @@ fun MarkdownContent(
     listState: LazyListState = rememberLazyListState(),
     restoreIndex: Int = 0,
     restoreOffset: Int = 0,
+    highlights: Set<Int> = emptySet(),
+    onToggleHighlight: (Int, String) -> Unit = { _, _ -> },
 ) {
     val dimens = LocalAppDimens.current
 
@@ -90,22 +96,57 @@ fun MarkdownContent(
         contentPadding = contentPadding,
         verticalArrangement = Arrangement.spacedBy(dimens.itemSpacing),
     ) {
-        itemsIndexed(blocks) { _, block ->
-            when (block) {
-                is MarkdownParser.MdBlock.Heading -> HeadingBlock(block)
-                is MarkdownParser.MdBlock.Paragraph -> Text(
-                    text = inlineText(block.content),
-                    style = MaterialTheme.typography.bodyLarge,
-                )
-                is MarkdownParser.MdBlock.CodeBlock -> CodeBlock(block)
-                is MarkdownParser.MdBlock.Blockquote -> BlockquoteBlock(block)
-                is MarkdownParser.MdBlock.UnorderedList -> BulletListBlock(block)
-                is MarkdownParser.MdBlock.OrderedList -> NumberedListBlock(block)
-                is MarkdownParser.MdBlock.Table -> TableBlock(block)
-                MarkdownParser.MdBlock.HorizontalRule -> HorizontalDivider(
-                    color = MaterialTheme.colorScheme.outlineVariant,
-                )
-            }
+        itemsIndexed(blocks) { index, block ->
+            HighlightableBlock(
+                block = block,
+                highlighted = index in highlights,
+                onLongPress = {
+                    onToggleHighlight(index, MarkdownParser.blockPreview(block))
+                },
+            )
+        }
+    }
+}
+
+/** 可标记内容块：长按任意块级元素切换高亮 */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun HighlightableBlock(
+    block: MarkdownParser.MdBlock,
+    highlighted: Boolean,
+    onLongPress: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(
+                onClick = {},
+                onLongClick = onLongPress,
+            )
+            .background(
+                color = if (highlighted) {
+                    MaterialTheme.colorScheme.primaryContainer
+                } else {
+                    Color.Transparent
+                },
+                shape = RoundedCornerShape(8.dp),
+            )
+            .padding(4.dp),
+    ) {
+        when (block) {
+            is MarkdownParser.MdBlock.Heading -> HeadingBlock(block)
+            is MarkdownParser.MdBlock.Paragraph -> Text(
+                text = inlineText(block.content),
+                style = MaterialTheme.typography.bodyLarge,
+            )
+            is MarkdownParser.MdBlock.CodeBlock -> CodeBlock(block)
+            is MarkdownParser.MdBlock.Blockquote -> BlockquoteBlock(block)
+            is MarkdownParser.MdBlock.UnorderedList -> BulletListBlock(block)
+            is MarkdownParser.MdBlock.OrderedList -> NumberedListBlock(block)
+            is MarkdownParser.MdBlock.Table -> TableBlock(block)
+            MarkdownParser.MdBlock.HorizontalRule -> HorizontalDivider(
+                color = MaterialTheme.colorScheme.outlineVariant,
+            )
         }
     }
 }

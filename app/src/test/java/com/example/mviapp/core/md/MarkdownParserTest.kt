@@ -158,4 +158,25 @@ class MarkdownParserTest {
 
         assertTrue(MarkdownParser.chapterBlockIndexes(blocks).isEmpty())
     }
+
+    @Test
+    fun `block preview returns plain text summary`() {
+        val blocks = MarkdownParser.parse(
+            "# 标题\n" +
+                "这是**一段**段落内容\n" +
+                "\n" +
+                "```kotlin\nval x = 1\n```",
+        )
+
+        assertEquals("标题", MarkdownParser.blockPreview(blocks[0]))
+        assertEquals("这是一段段落内容", MarkdownParser.blockPreview(blocks[1]))
+        assertEquals("val x = 1", MarkdownParser.blockPreview(blocks[2]))
+    }
+
+    @Test
+    fun `block preview is empty for horizontal rule`() {
+        val blocks = MarkdownParser.parse("---")
+
+        assertEquals("", MarkdownParser.blockPreview(blocks.single()))
+    }
 }

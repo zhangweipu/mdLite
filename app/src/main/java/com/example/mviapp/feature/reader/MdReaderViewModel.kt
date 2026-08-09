@@ -4,10 +4,14 @@ import android.net.Uri
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import com.example.mviapp.core.history.ReadingHistoryRepository
+import com.example.mviapp.core.marks.Bookmark
+import com.example.mviapp.core.marks.ParagraphHighlight
+import com.example.mviapp.core.marks.ReadingMarkRepository
 import com.example.mviapp.core.md.MdRepository
 import com.example.mviapp.core.mvi.MviViewModel
 import com.example.mviapp.core.navigation.Screen
 import com.example.mviapp.core.reader.ReadingPositionRepository
+import com.example.mviapp.core.reader.SavedScrollPosition
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -24,6 +28,7 @@ class MdReaderViewModel @Inject constructor(
     private val repository: MdRepository,
     private val historyRepository: ReadingHistoryRepository,
     private val positionRepository: ReadingPositionRepository,
+    private val markRepository: ReadingMarkRepository,
 ) : MviViewModel<MdReaderIntent, MdReaderState, MdReaderEffect>(
     initialState = MdReaderState.Loading
 ) {
@@ -43,6 +48,10 @@ class MdReaderViewModel @Inject constructor(
             is MdReaderIntent.LoadContent -> loadContent()
             is MdReaderIntent.Retry -> loadContent()
             is MdReaderIntent.SavePosition -> savePosition(intent.index, intent.offset)
+            is MdReaderIntent.TogglePin -> togglePin()
+            is MdReaderIntent.ToggleHighlight -> toggleHighlight(intent.blockIndex, intent.preview)
+            is MdReaderIntent.AddBookmark -> addBookmark(intent.blockIndex, intent.preview)
+            is MdReaderIntent.RemoveBookmark -> removeBookmark(intent.blockIndex)
         }
     }
 
@@ -61,14 +70,20 @@ class MdReaderViewModel @Inject constructor(
                     source = filePath,
                 )
                 val savedPosition = positionRepository.get(filePath)
-                content to savedPosition
+                val pinned = historyRepository.isPinned(filePath)
+                val highlights = markRepository.getHighlights(filePath)
+                val bookmarks = markRepository.getBookmarks(filePath)
+                LoadResult(content, savedPosition, pinned, highlights, bookmarks)
             }
-                .onSuccess { (content, savedPosition) ->
+                .onSuccess { result ->
                     updateState {
                         MdReaderState.Success(
-                            content = content,
-                            scrollIndex = savedPosition?.index ?: 0,
-                            scrollOffset = savedPosition?.offset ?: 0,
+                            content = result.content,
+                            scrollIndex = result.savedPosition?.index ?: 0,
+                            scrollOffset = result.savedPosition?.offset ?: 0,
+                            pinned = result.pinned,
+                            highlights = result.highlights,
+                            bookmarks = result.bookmarks,
                         )
                     }
                 }
@@ -83,7 +98,54 @@ class MdReaderViewModel @Inject constructor(
         runCatching { positionRepository.save(filePath, index, offset) }
     }
 
+    /** 切换置顶状态（与首页历史记录同步） */
+    private suspend fun togglePin() {
+        if (filePath.isBlank()) return
+        val current = currentState as? MdReaderState.Success ?: return
+        val newPinned = !current.pinned
+        runCatching { historyRepository.setPinned(filePath, newPinned) }
+        updateState { state ->
+            if (state is MdReaderState.Success) state.copy(pinned = newPinned) else state
+        }
+    }
+
+    /** 切换段落标记（高亮） */
+    private suspend fun toggleHighlight(blockIndex: Int, preview: String) {
+        if (filePath.isBlank()) return
+        val highlights = markRepository.toggleHighlight(filePath, blockIndex, preview)
+        updateState { state ->
+            if (state is MdReaderState.Success) state.copy(highlights = highlights) else state
+        }
+    }
+
+    /** 当前位置添加书签 */
+    private suspend fun addBookmark(blockIndex: Int, preview: String) {
+        if (filePath.isBlank()) return
+        val bookmarks = markRepository.addBookmark(filePath, blockIndex, preview)
+        updateState { state ->
+            if (state is MdReaderState.Success) state.copy(bookmarks = bookmarks) else state
+        }
+    }
+
+    /** 删除书签 */
+    private suspend fun removeBookmark(blockIndex: Int) {
+        if (filePath.isBlank()) return
+        val bookmarks = markRepository.removeBookmark(filePath, blockIndex)
+        updateState { state ->
+            if (state is MdReaderState.Success) state.copy(bookmarks = bookmarks) else state
+        }
+    }
+
     /** 未显式传标题时，从路径推导 */
     private fun fallbackTitle(): String =
         Uri.decode(filePath).substringAfterLast('/').removeSuffix(".md")
+
+    /** 文档加载结果（内容 + 阅读位置 + 置顶 + 标记） */
+    private data class LoadResult(
+        val content: String,
+        val savedPosition: SavedScrollPosition?,
+        val pinned: Boolean,
+        val highlights: List<ParagraphHighlight>,
+        val bookmarks: List<Bookmark>,
+    )
 }

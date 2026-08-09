@@ -2,6 +2,8 @@ package com.example.mviapp.di
 
 import com.example.mviapp.core.history.ReadingHistoryRepository
 import com.example.mviapp.core.history.SharedPreferencesHistoryRepository
+import com.example.mviapp.core.marks.ReadingMarkRepository
+import com.example.mviapp.core.marks.SharedPreferencesReadingMarkRepository
 import com.example.mviapp.core.md.AssetsMdRepository
 import com.example.mviapp.core.md.MdRepository
 import com.example.mviapp.core.reader.ReadingPositionRepository
@@ -51,4 +53,10 @@ abstract class AppModule {
     abstract fun bindReadingPositionRepository(
         impl: SharedPreferencesReadingPositionRepository
     ): ReadingPositionRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindReadingMarkRepository(
+        impl: SharedPreferencesReadingMarkRepository
+    ): ReadingMarkRepository
 }

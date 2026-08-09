@@ -1,5 +1,7 @@
 package com.example.mviapp.feature.reader
 
+import com.example.mviapp.core.marks.Bookmark
+import com.example.mviapp.core.marks.ParagraphHighlight
 import com.example.mviapp.core.mvi.MviState
 
 /**
@@ -18,6 +20,12 @@ sealed interface MdReaderState : MviState {
         val content: String,
         val scrollIndex: Int = 0,
         val scrollOffset: Int = 0,
+        /** 当前文档是否已置顶（顶栏图钉按钮状态） */
+        val pinned: Boolean = false,
+        /** 段落标记（高亮）列表 */
+        val highlights: List<ParagraphHighlight> = emptyList(),
+        /** 书签列表 */
+        val bookmarks: List<Bookmark> = emptyList(),
     ) : MdReaderState
 
     /** 加载失败 */
