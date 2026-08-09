@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.SdCard
 import androidx.compose.material.icons.filled.Storage
@@ -45,6 +46,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.example.mviapp.core.common.isSupportedDocFile
 import com.example.mviapp.core.navigation.AppNavHost
 import com.example.mviapp.core.navigation.Screen
 import com.example.mviapp.core.history.ReadingHistoryRepository
@@ -112,7 +114,7 @@ class MainActivity : ComponentActivity() {
                         ) { uri ->
                             if (uri != null) {
                                 val name = uri.displayName(context) ?: uri.fallbackName()
-                                if (name.isMarkdownFile()) {
+                                if (name.isSupportedDocFile()) {
                                     runCatching {
                                         context.contentResolver.takePersistableUriPermission(
                                             uri,
@@ -122,7 +124,7 @@ class MainActivity : ComponentActivity() {
                                     }
                                     navController.navigate(Screen.Reader.buildRoute(uri.toString(), name))
                                 } else {
-                                    Toast.makeText(context, "请选择 .md 文件", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "请选择文档文件", Toast.LENGTH_SHORT).show()
                                 }
                             }
                         }
@@ -136,7 +138,7 @@ class MainActivity : ComponentActivity() {
                                     var imported = 0
                                     uris.forEach { uri ->
                                         val name = uri.displayName(context) ?: uri.fallbackName()
-                                        if (name.isMarkdownFile()) {
+                                        if (name.isSupportedDocFile()) {
                                             runCatching {
                                                 context.contentResolver.takePersistableUriPermission(
                                                     uri,
@@ -150,7 +152,7 @@ class MainActivity : ComponentActivity() {
                                     }
                                     Toast.makeText(
                                         context,
-                                        if (imported > 0) "已导入 $imported 个 md 文件" else "未选择 md 文件",
+                                        if (imported > 0) "已导入 $imported 个文档" else "未选择文档文件",
                                         Toast.LENGTH_SHORT,
                                     ).show()
                                 }
@@ -207,6 +209,10 @@ class MainActivity : ComponentActivity() {
                                         scope.launch { drawerState.close() }
                                         batchImportLauncher.launch(arrayOf("*/*"))
                                     },
+                                    onLanDrop = {
+                                        scope.launch { drawerState.close() }
+                                        navController.navigate(Screen.LanDrop.route)
+                                    },
                                 )
                             },
                         ) {
@@ -242,6 +248,7 @@ private fun AppDrawerContent(
     onSelectStorage: () -> Unit,
     onOpenFile: () -> Unit,
     onBatchImport: () -> Unit,
+    onLanDrop: () -> Unit,
 ) {
     ModalDrawerSheet {
         Column(
@@ -285,17 +292,24 @@ private fun AppDrawerContent(
             modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
         )
         NavigationDrawerItem(
-            label = { Text("打开 md 文件") },
+            label = { Text("打开文档") },
             icon = { Icon(imageVector = Icons.Default.Description, contentDescription = null) },
             selected = false,
             onClick = onOpenFile,
             modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
         )
         NavigationDrawerItem(
-            label = { Text("批量导入 md 文件") },
+            label = { Text("批量导入文档") },
             icon = { Icon(imageVector = Icons.Default.Add, contentDescription = null) },
             selected = false,
             onClick = onBatchImport,
+            modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
+        )
+        NavigationDrawerItem(
+            label = { Text("LanDrop 下载") },
+            icon = { Icon(imageVector = Icons.Default.Download, contentDescription = null) },
+            selected = false,
+            onClick = onLanDrop,
             modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
         )
     }
@@ -329,7 +343,3 @@ private fun Uri.fallbackName(): String {
         .substringAfterLast(':')
         .ifBlank { "Markdown 文档" }
 }
-
-/** 是否为项目支持的 Markdown 文件 */
-private fun String.isMarkdownFile(): Boolean =
-    endsWith(".md", ignoreCase = true) || endsWith(".markdown", ignoreCase = true)

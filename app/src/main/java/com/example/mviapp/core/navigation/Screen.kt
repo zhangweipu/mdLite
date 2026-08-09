@@ -24,6 +24,9 @@ sealed class Screen(val route: String) {
         fun buildRoute(treeUri: String): String = "$route/${Uri.encode(treeUri)}"
     }
 
+    /** LanDrop 局域网文件下载页 */
+    data object LanDrop : Screen("landrop")
+
     /** Markdown 阅读页（带参数） */
     data object Reader : Screen("reader") {
         const val ARG_FILE_PATH = "filePath"

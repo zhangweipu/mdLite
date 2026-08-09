@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import android.provider.DocumentsContract
 import dagger.hilt.android.qualifiers.ApplicationContext
+import com.example.mviapp.core.common.isSupportedDocFile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
@@ -94,7 +95,7 @@ class AndroidStorageRepository @Inject constructor(
                 val childDocId = cursor.getString(idColumn) ?: continue
                 val mime = cursor.getString(mimeColumn)
                 val isDirectory = mime == DocumentsContract.Document.MIME_TYPE_DIR
-                if (isDirectory || name.endsWith(".md", ignoreCase = true)) {
+                if (isDirectory || name.isSupportedDocFile()) {
                     val childUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, childDocId)
                     entries += FileEntry(
                         name = name,

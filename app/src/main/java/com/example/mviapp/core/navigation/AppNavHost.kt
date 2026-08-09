@@ -7,8 +7,11 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import androidx.navigation.NavType
+import com.example.mviapp.core.common.isPdfFile
 import com.example.mviapp.feature.files.FilesScreen
 import com.example.mviapp.feature.home.HomeScreen
+import com.example.mviapp.feature.landrop.LanDropScreen
+import com.example.mviapp.feature.pdf.PdfReaderScreen
 import com.example.mviapp.feature.reader.MdReaderScreen
 
 /**
@@ -58,6 +61,13 @@ fun AppNavHost(
             )
         }
 
+        // ====== LanDrop 下载页 ======
+        composable(Screen.LanDrop.route) {
+            LanDropScreen(
+                onBack = { navController.popBackStack() },
+            )
+        }
+
         // ====== Markdown 阅读页 ======
         composable(
             route = Screen.Reader.routeWithArgs,
@@ -80,11 +90,19 @@ fun AppNavHost(
             val fileTitle = title.ifBlank {
                 Uri.decode(filePath).substringAfterLast('/').removeSuffix(".md")
             }
-            MdReaderScreen(
-                filePath = filePath,
-                fileTitle = fileTitle,
-                onBack = { navController.popBackStack() },
-            )
+            if (filePath.isPdfFile()) {
+                PdfReaderScreen(
+                    filePath = filePath,
+                    fileTitle = fileTitle,
+                    onBack = { navController.popBackStack() },
+                )
+            } else {
+                MdReaderScreen(
+                    filePath = filePath,
+                    fileTitle = fileTitle,
+                    onBack = { navController.popBackStack() },
+                )
+            }
         }
     }
 }

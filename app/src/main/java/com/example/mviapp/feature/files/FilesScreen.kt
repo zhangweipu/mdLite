@@ -78,9 +78,9 @@ fun FilesScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = {
-                    Text(
-                        text = (state as? FilesState.Success)?.directoryName ?: "选择 md 文件",
+                        title = {
+                            Text(
+                                text = (state as? FilesState.Success)?.directoryName ?: "选择文档",
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -120,7 +120,7 @@ fun FilesScreen(
                     if (s.entries.isEmpty()) {
                         item {
                             Text(
-                                text = "该文件夹下没有 md 文件",
+                                text = "该文件夹下没有文档文件",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(vertical = 24.dp),
