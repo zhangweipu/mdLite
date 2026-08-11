@@ -15,8 +15,8 @@ android {
         applicationId = "com.example.mviapp"
         minSdk = 24
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "V2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -45,6 +45,13 @@ android {
 
     buildFeatures {
         compose = true
+    }
+
+    applicationVariants.all {
+        outputs.all {
+            val apk = this as com.android.build.gradle.internal.api.ApkVariantOutputImpl
+            apk.outputFileName = "MviApp-${defaultConfig.versionName}-${defaultConfig.versionCode}-${name}.apk"
+        }
     }
 }
 

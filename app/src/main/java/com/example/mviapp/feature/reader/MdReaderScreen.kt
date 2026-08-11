@@ -51,11 +51,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.example.mviapp.core.common.isHtmlFile
 import com.example.mviapp.core.common.isTxtFile
 import com.example.mviapp.core.marks.Bookmark
 import com.example.mviapp.core.marks.ParagraphHighlight
-import com.example.mviapp.core.md.HtmlToMarkdown
 import com.example.mviapp.core.md.MarkdownContent
 import com.example.mviapp.core.md.MarkdownParser
 import com.example.mviapp.core.ui.config.LocalAppDimens
@@ -79,11 +77,10 @@ fun MdReaderScreen(
     val dimens = LocalAppDimens.current
     // 内容与滚动状态提升到页面级：顶栏的“添加书签”需要读取当前滚动位置
     val content = (state as? MdReaderState.Success)?.content
-    // HTML 文件先转为 Markdown；txt 按行拆成段落保留换行；再走统一解析渲染
+    // txt 按行拆成段落保留换行；其余按 Markdown 解析渲染
     val blocks = remember(content, filePath) {
         content?.let {
             val source = when {
-                filePath.isHtmlFile() -> HtmlToMarkdown.convert(it)
                 filePath.isTxtFile() -> it.lines().joinToString("\n\n") { line -> line.trimEnd() }
                 else -> it
             }
