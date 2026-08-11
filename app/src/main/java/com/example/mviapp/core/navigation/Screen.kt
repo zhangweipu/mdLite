@@ -27,6 +27,24 @@ sealed class Screen(val route: String) {
     /** LanDrop 局域网文件下载页 */
     data object LanDrop : Screen("landrop")
 
+    /** GitHub 文件浏览下载页 */
+    data object Github : Screen("github")
+
+    /** 网页浏览器 */
+    data object Browser : Screen("browser") {
+        const val ARG_URL = "url"
+        val routeWithArgs = "$route?$ARG_URL={$ARG_URL}"
+
+        fun buildRoute(url: String = ""): String =
+            if (url.isBlank()) route else "$route?$ARG_URL=${Uri.encode(url)}"
+    }
+
+    /** 下载管理 */
+    data object DownloadList : Screen("download-list")
+
+    /** 收藏夹 */
+    data object Bookmarks : Screen("bookmarks")
+
     /** Markdown 阅读页（带参数） */
     data object Reader : Screen("reader") {
         const val ARG_FILE_PATH = "filePath"

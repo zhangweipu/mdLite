@@ -1,5 +1,11 @@
 package com.example.mviapp.di
 
+import com.example.mviapp.core.bookmark.BookmarkRepository
+import com.example.mviapp.core.bookmark.SharedPreferencesBookmarkRepository
+import com.example.mviapp.core.download.DownloadRepository
+import com.example.mviapp.core.download.OkHttpDownloadRepository
+import com.example.mviapp.core.github.GithubRepository
+import com.example.mviapp.core.github.RetrofitGithubRepository
 import com.example.mviapp.core.history.ReadingHistoryRepository
 import com.example.mviapp.core.history.SharedPreferencesHistoryRepository
 import com.example.mviapp.core.marks.ReadingMarkRepository
@@ -12,6 +18,7 @@ import com.example.mviapp.core.storage.AndroidStorageRepository
 import com.example.mviapp.core.storage.StorageRepository
 import dagger.Binds
 import dagger.Module
+import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import javax.inject.Singleton
@@ -59,4 +66,22 @@ abstract class AppModule {
     abstract fun bindReadingMarkRepository(
         impl: SharedPreferencesReadingMarkRepository
     ): ReadingMarkRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindGithubRepository(
+        impl: RetrofitGithubRepository
+    ): GithubRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindDownloadRepository(
+        impl: OkHttpDownloadRepository
+    ): DownloadRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindBookmarkRepository(
+        impl: SharedPreferencesBookmarkRepository
+    ): BookmarkRepository
 }

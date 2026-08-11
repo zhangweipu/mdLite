@@ -21,7 +21,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.SdCard
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.DrawerValue
@@ -213,6 +215,18 @@ class MainActivity : ComponentActivity() {
                                         scope.launch { drawerState.close() }
                                         navController.navigate(Screen.LanDrop.route)
                                     },
+                                    onGithub = {
+                                        scope.launch { drawerState.close() }
+                                        navController.navigate(Screen.Github.route)
+                                    },
+                                    onBrowser = {
+                                        scope.launch { drawerState.close() }
+                                        navController.navigate(Screen.Browser.route)
+                                    },
+                                    onDownloadList = {
+                                        scope.launch { drawerState.close() }
+                                        navController.navigate(Screen.DownloadList.route)
+                                    },
                                 )
                             },
                         ) {
@@ -249,6 +263,9 @@ private fun AppDrawerContent(
     onOpenFile: () -> Unit,
     onBatchImport: () -> Unit,
     onLanDrop: () -> Unit,
+    onGithub: () -> Unit,
+    onBrowser: () -> Unit,
+    onDownloadList: () -> Unit,
 ) {
     ModalDrawerSheet {
         Column(
@@ -310,6 +327,27 @@ private fun AppDrawerContent(
             icon = { Icon(imageVector = Icons.Default.Download, contentDescription = null) },
             selected = false,
             onClick = onLanDrop,
+            modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
+        )
+        NavigationDrawerItem(
+            label = { Text("GitHub 文件") },
+            icon = { Icon(imageVector = Icons.Default.Code, contentDescription = null) },
+            selected = currentRoute == Screen.Github.route,
+            onClick = onGithub,
+            modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
+        )
+        NavigationDrawerItem(
+            label = { Text("网页浏览器") },
+            icon = { Icon(imageVector = Icons.Default.Public, contentDescription = null) },
+            selected = currentRoute == Screen.Browser.route,
+            onClick = onBrowser,
+            modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
+        )
+        NavigationDrawerItem(
+            label = { Text("下载管理") },
+            icon = { Icon(imageVector = Icons.Default.Download, contentDescription = null) },
+            selected = currentRoute == Screen.DownloadList.route,
+            onClick = onDownloadList,
             modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
         )
     }

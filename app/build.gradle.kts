@@ -88,6 +88,15 @@ dependencies {
     // Serialization
     implementation(libs.kotlinx.serialization.json)
 
+    // Network
+    implementation(libs.retrofit.core)
+    implementation(libs.retrofit.kotlinx.serialization)
+    implementation(libs.okhttp)
+    implementation(libs.okhttp.logging)
+
+    // ML Kit 二维码扫描
+    implementation(libs.mlkit.barcode.scanning)
+
     // Testing
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

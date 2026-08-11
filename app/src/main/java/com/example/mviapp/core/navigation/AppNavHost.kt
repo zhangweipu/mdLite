@@ -10,11 +10,15 @@ import androidx.navigation.NavType
 import com.example.mviapp.core.common.isHtmlFile
 import com.example.mviapp.core.common.isPdfFile
 import com.example.mviapp.feature.files.FilesScreen
+import com.example.mviapp.feature.github.GithubScreen
 import com.example.mviapp.feature.home.HomeScreen
 import com.example.mviapp.feature.html.HtmlReaderScreen
 import com.example.mviapp.feature.landrop.LanDropScreen
 import com.example.mviapp.feature.pdf.PdfReaderScreen
 import com.example.mviapp.feature.reader.MdReaderScreen
+import com.example.mviapp.feature.bookmarks.BookmarksScreen
+import com.example.mviapp.feature.browser.BrowserScreen
+import com.example.mviapp.feature.download.DownloadListScreen
 
 /**
  * 应用导航图
@@ -67,6 +71,54 @@ fun AppNavHost(
         composable(Screen.LanDrop.route) {
             LanDropScreen(
                 onBack = { navController.popBackStack() },
+            )
+        }
+
+        // ====== GitHub 文件页 ======
+        composable(Screen.Github.route) {
+            GithubScreen(
+                onBack = { navController.popBackStack() },
+            )
+        }
+
+        // ====== 网页浏览器 ======
+        composable(
+            route = Screen.Browser.routeWithArgs,
+            arguments = listOf(
+                navArgument(Screen.Browser.ARG_URL) {
+                    type = NavType.StringType
+                    defaultValue = ""
+                }
+            ),
+        ) { backStackEntry ->
+            val initialUrl = backStackEntry.arguments
+                ?.getString(Screen.Browser.ARG_URL)
+                .orEmpty()
+            BrowserScreen(
+                onBack = { navController.popBackStack() },
+                onNavigateToDownloadList = { navController.navigate(Screen.DownloadList.route) },
+                onNavigateToBookmarks = { navController.navigate(Screen.Bookmarks.route) },
+                initialUrl = initialUrl,
+            )
+        }
+
+        // ====== 下载管理 ======
+        composable(Screen.DownloadList.route) {
+            DownloadListScreen(
+                onBack = { navController.popBackStack() },
+            )
+        }
+
+        // ====== 收藏夹 ======
+        composable(Screen.Bookmarks.route) {
+            BookmarksScreen(
+                onBack = { navController.popBackStack() },
+                onOpenUrl = { url ->
+                    // 从收藏夹打开 → 跳转到浏览器页面并加载该 URL
+                    navController.navigate(Screen.Browser.buildRoute(url)) {
+                        popUpTo(Screen.Browser.route) { inclusive = true }
+                    }
+                },
             )
         }
 
