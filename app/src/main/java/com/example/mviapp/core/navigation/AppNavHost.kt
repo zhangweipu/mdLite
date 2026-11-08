@@ -7,6 +7,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import androidx.navigation.NavType
+import com.example.mviapp.core.common.isEpubFile
 import com.example.mviapp.core.common.isHtmlFile
 import com.example.mviapp.core.common.isPdfFile
 import com.example.mviapp.feature.files.FilesScreen
@@ -19,6 +20,7 @@ import com.example.mviapp.feature.reader.MdReaderScreen
 import com.example.mviapp.feature.bookmarks.BookmarksScreen
 import com.example.mviapp.feature.browser.BrowserScreen
 import com.example.mviapp.feature.download.DownloadListScreen
+import com.example.mviapp.feature.epub.EpubReaderScreen
 
 /**
  * 应用导航图
@@ -122,6 +124,32 @@ fun AppNavHost(
             )
         }
 
+        // ====== EPUB 阅读器 ======
+        composable(
+            route = Screen.EpubReader.routeWithArgs,
+            arguments = listOf(
+                navArgument(Screen.EpubReader.ARG_FILE_PATH) {
+                    type = NavType.StringType
+                },
+                navArgument(Screen.EpubReader.ARG_TITLE) {
+                    type = NavType.StringType
+                    defaultValue = ""
+                }
+            ),
+        ) { backStackEntry ->
+            val filePath = backStackEntry.arguments
+                ?.getString(Screen.EpubReader.ARG_FILE_PATH)
+                .orEmpty()
+            val title = backStackEntry.arguments
+                ?.getString(Screen.EpubReader.ARG_TITLE)
+                .orEmpty()
+            EpubReaderScreen(
+                filePath = filePath,
+                fileTitle = title,
+                onBack = { navController.popBackStack() },
+            )
+        }
+
         // ====== Markdown 阅读页 ======
         composable(
             route = Screen.Reader.routeWithArgs,
@@ -144,7 +172,14 @@ fun AppNavHost(
             val fileTitle = title.ifBlank {
                 Uri.decode(filePath).substringAfterLast('/').removeSuffix(".md")
             }
-            if (filePath.isPdfFile()) {
+            // EPUB 文件跳转到专用阅读器
+            if (filePath.isEpubFile()) {
+                EpubReaderScreen(
+                    filePath = filePath,
+                    fileTitle = fileTitle,
+                    onBack = { navController.popBackStack() },
+                )
+            } else if (filePath.isPdfFile()) {
                 PdfReaderScreen(
                     filePath = filePath,
                     fileTitle = fileTitle,

@@ -22,6 +22,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
@@ -30,9 +32,11 @@ import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -42,6 +46,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -51,6 +56,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -79,6 +85,7 @@ fun BrowserScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
+    val context = androidx.compose.ui.platform.LocalContext.current
 
     // WebView 引用
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
@@ -88,6 +95,10 @@ fun BrowserScreen(
     var pendingDownload by remember { mutableStateOf<Pair<String, String>?>(null) }
     // 是否已经加载过上次访问的网址
     var hasLoadedInitial by remember { mutableStateOf(false) }
+    // 地址输入弹窗是否显示
+    var showAddressDialog by remember { mutableStateOf(false) }
+    // 弹窗中的地址输入（本地状态，确认后才同步到 ViewModel）
+    var dialogInput by remember { mutableStateOf("") }
 
     // 系统"保存到"选择器（下载文件）
     val saveLauncher = rememberLauncherForActivityResult(
@@ -145,6 +156,12 @@ fun BrowserScreen(
         }
     }
 
+    // 打开地址弹窗时，用当前地址填充
+    fun openAddressDialog() {
+        dialogInput = state.currentUrl.ifBlank { state.addressInput }
+        showAddressDialog = true
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -161,6 +178,9 @@ fun BrowserScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = { openAddressDialog() }) {
+                        Icon(Icons.Filled.Link, contentDescription = "地址")
+                    }
                     IconButton(onClick = { viewModel.dispatch(BrowserIntent.ToggleBookmark) }) {
                         Icon(
                             imageVector = if (state.isBookmarked) Icons.Filled.Bookmark else Icons.Filled.BookmarkBorder,
@@ -177,43 +197,43 @@ fun BrowserScreen(
             )
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
+        bottomBar = {
+            // 底部导航栏：后退 / 前进 / 刷新
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(onClick = { webViewRef?.goBack() }, enabled = state.canGoBack) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "后退")
+                }
+                IconButton(onClick = { webViewRef?.goForward() }, enabled = state.canGoForward) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "前进")
+                }
+                IconButton(onClick = {
+                    if (state.isLoading) webViewRef?.stopLoading() else webViewRef?.reload()
+                }) {
+                    Icon(
+                        imageVector = if (state.isLoading) Icons.Filled.Stop else Icons.Filled.Refresh,
+                        contentDescription = if (state.isLoading) "停止" else "刷新",
+                    )
+                }
+            }
+        },
     ) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding),
         ) {
-            // 地址栏 + 导航按钮
-            AddressBar(
-                input = state.addressInput,
-                onInputChange = { viewModel.updateAddressInput(it) },
-                onSubmit = { input ->
-                    viewModel.dispatch(BrowserIntent.SubmitUrl(input))
-                    pendingUrl = normalizeForLoad(input, state.addressInput)
-                },
-                onPaste = { viewModel.dispatch(BrowserIntent.PasteAndGo) },
-                onScanQr = {
-                    pickImageLauncher.launch(
-                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                    )
-                },
-                canGoBack = state.canGoBack,
-                canGoForward = state.canGoForward,
-                isLoading = state.isLoading,
-                onGoBack = { webViewRef?.goBack() },
-                onGoForward = { webViewRef?.goForward() },
-                onRefresh = { webViewRef?.reload() },
-                onStop = { webViewRef?.stopLoading() },
-            )
-
             // 加载进度条
             if (state.isLoading) {
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-            } else {
-                Spacer(modifier = Modifier.height(1.dp))
             }
 
-            // WebView
+            // WebView（占满剩余空间）
             Box(modifier = Modifier.weight(1f)) {
                 WebViewContent(
                     onWebViewReady = { webViewRef = it },
@@ -228,82 +248,116 @@ fun BrowserScreen(
             }
         }
     }
-}
 
-/** 规范化 URL 用于加载 */
-private fun normalizeForLoad(rawInput: String, stateInput: String): String {
-    val input = stateInput.ifBlank { rawInput.trim() }
-    return when {
-        input.startsWith("http://", ignoreCase = true) ||
-            input.startsWith("https://", ignoreCase = true) -> input
-        input.contains('.') && !input.contains(' ') -> "https://$input"
-        else -> "https://www.google.com/search?q=${Uri.encode(input)}"
+    // 地址输入弹窗
+    if (showAddressDialog) {
+        AddressInputDialog(
+            input = dialogInput,
+            onInputChange = { dialogInput = it },
+            onDismiss = { showAddressDialog = false },
+            onConfirm = { input ->
+                val normalized = normalizeUrl(input)
+                viewModel.updateAddressInput(normalized)
+                pendingUrl = normalized
+                showAddressDialog = false
+            },
+            onPaste = {
+                val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                val clip = clipboard.primaryClip
+                val text = clip?.getItemAt(0)?.text?.toString()?.trim()
+                if (!text.isNullOrBlank()) {
+                    dialogInput = text
+                }
+            },
+            onScanQr = {
+                showAddressDialog = false
+                pickImageLauncher.launch(
+                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                )
+            },
+        )
     }
 }
 
+/** 规范化 URL（用于弹窗确认后直接加载） */
+private fun normalizeUrl(input: String): String {
+    val trimmed = input.trim()
+    return when {
+        trimmed.startsWith("http://", ignoreCase = true) ||
+            trimmed.startsWith("https://", ignoreCase = true) -> trimmed
+        trimmed.contains('.') && !trimmed.contains(' ') -> "https://$trimmed"
+        else -> "https://www.google.com/search?q=${Uri.encode(trimmed)}"
+    }
+}
+
+/**
+ * 地址输入弹窗
+ *
+ * 把地址输入从主界面移到弹窗，节省页面空间，
+ * 让 WebView 内容区域更大，低配设备上也更流畅。
+ */
 @Composable
-private fun AddressBar(
+private fun AddressInputDialog(
     input: String,
     onInputChange: (String) -> Unit,
-    onSubmit: (String) -> Unit,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
     onPaste: () -> Unit,
     onScanQr: () -> Unit,
-    canGoBack: Boolean,
-    canGoForward: Boolean,
-    isLoading: Boolean,
-    onGoBack: () -> Unit,
-    onGoForward: () -> Unit,
-    onRefresh: () -> Unit,
-    onStop: () -> Unit,
 ) {
-    Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            OutlinedTextField(
-                value = input,
-                onValueChange = onInputChange,
-                placeholder = { Text("输入网址或搜索") },
-                singleLine = true,
-                modifier = Modifier.weight(1f),
-                trailingIcon = {
-                    Row {
-                        IconButton(onClick = onPaste) {
-                            Icon(Icons.Filled.ContentPaste, contentDescription = "粘贴")
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("输入网址") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = input,
+                    onValueChange = onInputChange,
+                    placeholder = { Text("网址或搜索词") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
+                    keyboardActions = KeyboardActions(
+                        onGo = {
+                            if (input.isNotBlank()) onConfirm(input)
                         }
-                        IconButton(onClick = onScanQr) {
-                            Icon(Icons.Filled.QrCodeScanner, contentDescription = "扫码")
-                        }
+                    ),
+                    trailingIcon = {
                         if (input.isNotBlank()) {
                             IconButton(onClick = { onInputChange("") }) {
                                 Icon(Icons.Filled.Close, contentDescription = "清空")
                             }
                         }
-                    }
-                },
-            )
-        }
-        Spacer(modifier = Modifier.height(4.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(onClick = onGoBack, enabled = canGoBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "后退")
-            }
-            IconButton(onClick = onGoForward, enabled = canGoForward) {
-                Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "前进")
-            }
-            IconButton(onClick = { if (isLoading) onStop() else onRefresh() }) {
-                Icon(
-                    imageVector = if (isLoading) Icons.Filled.Stop else Icons.Filled.Refresh,
-                    contentDescription = if (isLoading) "停止" else "刷新",
+                    },
                 )
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    IconButton(onClick = onPaste) {
+                        Icon(Icons.Filled.ContentPaste, contentDescription = "粘贴")
+                    }
+                    IconButton(onClick = onScanQr) {
+                        Icon(Icons.Filled.QrCodeScanner, contentDescription = "扫码")
+                    }
+                }
             }
-        }
-    }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(input) },
+                enabled = input.isNotBlank(),
+            ) {
+                Text("前往")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        },
+    )
 }
 
 /**

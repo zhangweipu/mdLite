@@ -45,6 +45,16 @@ sealed class Screen(val route: String) {
     /** 收藏夹 */
     data object Bookmarks : Screen("bookmarks")
 
+    /** EPUB 阅读器 */
+    data object EpubReader : Screen("epub-reader") {
+        const val ARG_FILE_PATH = "filePath"
+        const val ARG_TITLE = "title"
+        val routeWithArgs = "$route/{$ARG_FILE_PATH}?$ARG_TITLE={$ARG_TITLE}"
+
+        fun buildRoute(filePath: String, title: String = ""): String =
+            "$route/${Uri.encode(filePath)}?$ARG_TITLE=${Uri.encode(title)}"
+    }
+
     /** Markdown 阅读页（带参数） */
     data object Reader : Screen("reader") {
         const val ARG_FILE_PATH = "filePath"

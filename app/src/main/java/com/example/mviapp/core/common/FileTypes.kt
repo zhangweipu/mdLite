@@ -16,6 +16,10 @@ fun String.isTxtFile(): Boolean =
 fun String.isPdfFile(): Boolean =
     endsWith(".pdf", ignoreCase = true)
 
-/** 是否为阅读器支持的文档文件（md / html / txt / pdf） */
+/** 是否为 EPUB 文件 */
+fun String.isEpubFile(): Boolean =
+    endsWith(".epub", ignoreCase = true)
+
+/** 是否为阅读器支持的文档文件（md / html / txt / pdf / epub） */
 fun String.isSupportedDocFile(): Boolean =
-    isMarkdownFile() || isHtmlFile() || isTxtFile() || isPdfFile()
+    isMarkdownFile() || isHtmlFile() || isTxtFile() || isPdfFile() || isEpubFile()
