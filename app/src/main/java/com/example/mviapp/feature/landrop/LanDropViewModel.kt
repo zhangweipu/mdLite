@@ -121,6 +121,13 @@ class LanDropViewModel @Inject constructor(
             emitEffect(LanDropEffect.ShowToast("请等待当前下载完成"))
             return
         }
+        // 下载前就持久化权限，失败后仍可从最近阅读打开
+        runCatching {
+            context.contentResolver.takePersistableUriPermission(
+                destinationUri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+            )
+        }
         viewModelScope.launch {
             updateState { state ->
                 if (state is LanDropState.Connected) {
@@ -163,6 +170,7 @@ class LanDropViewModel @Inject constructor(
                     emitEffect(LanDropEffect.ShowToast("下载完成：$name"))
                 }
                 .onFailure { error ->
+                    removeEmptyTarget(destinationUri)
                     updateState { state ->
                         if (state is LanDropState.Connected) {
                             state.copy(downloadingName = null, progress = 0)
@@ -172,6 +180,21 @@ class LanDropViewModel @Inject constructor(
                     }
                     emitEffect(LanDropEffect.ShowToast("下载失败：${error.message ?: "未知错误"}"))
                 }
+        }
+    }
+
+    /** 失败时清掉 SAF 预创建的 0 字节占位文件（不误删已有内容） */
+    private fun removeEmptyTarget(uri: Uri) {
+        runCatching {
+            if (!uri.scheme.equals("content", ignoreCase = true)) return
+            val size = context.contentResolver.query(
+                uri, arrayOf(android.provider.OpenableColumns.SIZE), null, null, null,
+            )?.use { cursor ->
+                if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getLong(0) else -1L
+            } ?: -1L
+            if (size == 0L) {
+                android.provider.DocumentsContract.deleteDocument(context.contentResolver, uri)
+            }
         }
     }
 

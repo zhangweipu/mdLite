@@ -1,8 +1,10 @@
 package com.example.mviapp.feature.download
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -14,7 +16,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Download
@@ -26,6 +28,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -35,7 +38,6 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -44,12 +46,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.mviapp.core.download.DownloadItem
 import com.example.mviapp.core.download.DownloadStatus
+import com.example.mviapp.core.ui.AppTopBar
+import com.example.mviapp.core.ui.rememberAppBarScrollController
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -64,10 +69,12 @@ import java.util.Locale
 @Composable
 fun DownloadListScreen(
     onOpenDrawer: () -> Unit,
+    onOpenFile: (path: String, title: String) -> Unit,
     viewModel: DownloadListViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
+    val topBarController = rememberAppBarScrollController()
     var showClearConfirm by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
@@ -79,14 +86,12 @@ fun DownloadListScreen(
     }
 
     Scaffold(
+        modifier = Modifier.nestedScroll(topBarController.nestedScrollConnection),
         topBar = {
-            TopAppBar(
-                title = { Text("下载管理") },
-                navigationIcon = {
-                    IconButton(onClick = onOpenDrawer) {
-                        Icon(Icons.Filled.Menu, contentDescription = "打开菜单")
-                    }
-                },
+            AppTopBar(
+                title = "下载管理",
+                onOpenDrawer = onOpenDrawer,
+                controller = topBarController,
                 actions = {
                     if (state.items.isNotEmpty()) {
                         IconButton(onClick = { showClearConfirm = true }) {
@@ -116,6 +121,7 @@ fun DownloadListScreen(
                 else -> DownloadListContent(
                     items = state.items,
                     onRemove = { id -> viewModel.dispatch(DownloadListIntent.Remove(id)) },
+                    onOpen = { item -> onOpenFile(item.localPath, item.fileName) },
                 )
             }
         }
@@ -175,6 +181,7 @@ private fun EmptyView() {
 private fun DownloadListContent(
     items: List<DownloadItem>,
     onRemove: (String) -> Unit,
+    onOpen: (DownloadItem) -> Unit,
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -188,6 +195,7 @@ private fun DownloadListContent(
             DownloadItemRow(
                 item = item,
                 onRemove = { onRemove(item.id) },
+                onOpen = { onOpen(item) },
             )
         }
     }
@@ -197,9 +205,12 @@ private fun DownloadListContent(
 private fun DownloadItemRow(
     item: DownloadItem,
     onRemove: () -> Unit,
+    onOpen: () -> Unit,
 ) {
+    val canOpen = item.status == DownloadStatus.Completed && item.localPath.isNotBlank()
     Card(
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        modifier = Modifier.clickable(enabled = canOpen, onClick = onOpen),
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Row(
@@ -225,7 +236,14 @@ private fun DownloadItemRow(
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = buildString {
-                            append(statusText(item.status))
+                            // 下载完成且文件可用时，状态直接呈现为「打开」
+                            append(
+                                if (item.status == DownloadStatus.Completed && canOpen) {
+                                    "打开"
+                                } else {
+                                    statusText(item.status)
+                                }
+                            )
                             append(" · ")
                             append(formatDate(item.createdAt))
                             if (item.status == DownloadStatus.Completed || item.status == DownloadStatus.Downloading) {
@@ -242,6 +260,25 @@ private fun DownloadItemRow(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
+                }
+                // 下载完成后提供显式的「打开」入口，不必靠猜整行可点
+                if (canOpen) {
+                    FilledTonalButton(
+                        onClick = onOpen,
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                        modifier = Modifier.height(32.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "打开",
+                            style = MaterialTheme.typography.labelMedium,
+                        )
+                    }
                 }
                 // 删除按钮
                 IconButton(onClick = onRemove) {

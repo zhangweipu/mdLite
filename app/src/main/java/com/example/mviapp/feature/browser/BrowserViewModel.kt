@@ -3,6 +3,7 @@ package com.example.mviapp.feature.browser
 import android.content.ClipboardManager
 import android.content.Context
 import android.net.Uri
+import androidx.lifecycle.SavedStateHandle
 import com.example.mviapp.core.bookmark.BookmarkRepository
 import com.example.mviapp.core.download.DownloadRepository
 import androidx.lifecycle.viewModelScope
@@ -27,6 +28,7 @@ class BrowserViewModel @Inject constructor(
     private val downloadRepository: DownloadRepository,
     private val bookmarkRepository: BookmarkRepository,
     private val qrCodeScanner: QrCodeScanner,
+    private val savedStateHandle: SavedStateHandle,
 ) : MviViewModel<BrowserIntent, BrowserState, BrowserEffect>(
     initialState = BrowserState()
 ) {
@@ -123,9 +125,33 @@ class BrowserViewModel @Inject constructor(
         emitEffect(BrowserEffect.RequestSaveLocation(url, fileName))
     }
 
+    /**
+     * 保存待下载信息到 SavedStateHandle。
+     *
+     * 系统「保存到」选择器是一个独立 Activity，期间本 Activity 可能被系统回收重建。
+     * 以前把待下载信息放在 Composable 的 remember 里，重建后信息丢失，
+     * 用户选完位置不会开始下载，只在磁盘上留下 SAF 预创建的 0 字节文件。
+     */
+    fun rememberPendingDownload(url: String, fileName: String) {
+        savedStateHandle[KEY_PENDING_URL] = url
+        savedStateHandle[KEY_PENDING_NAME] = fileName
+    }
+
+    /** 取出并清除待下载信息（Activity 重建后仍可用） */
+    fun consumePendingDownload(): Pair<String, String>? {
+        val url = savedStateHandle.get<String>(KEY_PENDING_URL)
+        val name = savedStateHandle.get<String>(KEY_PENDING_NAME)
+        savedStateHandle.remove<String>(KEY_PENDING_URL)
+        savedStateHandle.remove<String>(KEY_PENDING_NAME)
+        return if (!url.isNullOrBlank() && !name.isNullOrBlank()) url to name else null
+    }
+
     private fun confirmDownload(url: String, fileName: String, destinationUri: Uri) {
+        val referer = currentState.currentUrl.takeIf { it.isNotBlank() }
         viewModelScope.launch {
-            downloadRepository.startDownload(url, fileName, destinationUri)
+            // startDownload 立即返回，真正的下载在应用级作用域执行，
+            // 离开本页不会中断任务、也不会留下 0 字节文件。
+            downloadRepository.startDownload(url, fileName, destinationUri, referer)
             emitEffect(BrowserEffect.ShowToast("已加入下载队列：$fileName"))
         }
     }
@@ -260,5 +286,10 @@ class BrowserViewModel @Inject constructor(
     fun updateAddressInput(input: String) {
         if (currentState.addressInput == input) return
         updateState { it.copy(addressInput = input) }
+    }
+
+    private companion object {
+        const val KEY_PENDING_URL = "pending_download_url"
+        const val KEY_PENDING_NAME = "pending_download_name"
     }
 }

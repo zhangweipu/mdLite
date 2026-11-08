@@ -17,7 +17,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.InsertDriveFile
@@ -37,7 +36,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -46,11 +44,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.mviapp.core.github.GithubFile
+import com.example.mviapp.core.ui.AppTopBar
+import com.example.mviapp.core.ui.rememberAppBarScrollController
 
 /**
  * GitHub 文件浏览下载页
@@ -66,17 +68,22 @@ fun GithubScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
-    var pendingDownload by remember { mutableStateOf<Pair<String, String>?>(null) }
+    val topBarController = rememberAppBarScrollController()
+    val context = LocalContext.current
 
     // 系统"保存到"选择器：选择保存位置后开始下载
+    // 待下载信息存在 ViewModel 的 SavedStateHandle 中，Activity 回收重建后不丢失
     val saveLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/octet-stream"),
     ) { uri ->
-        val pending = pendingDownload
-        pendingDownload = null
+        val pending = viewModel.consumePendingDownload()
         if (uri != null && pending != null) {
             val (name, url) = pending
             viewModel.dispatch(GithubIntent.DownloadFile(name, url, uri))
+        } else if (uri != null) {
+            runCatching {
+                android.provider.DocumentsContract.deleteDocument(context.contentResolver, uri)
+            }
         }
     }
 
@@ -89,14 +96,12 @@ fun GithubScreen(
     }
 
     Scaffold(
+        modifier = Modifier.nestedScroll(topBarController.nestedScrollConnection),
         topBar = {
-            TopAppBar(
-                title = { Text("GitHub 文件") },
-                navigationIcon = {
-                    IconButton(onClick = onOpenDrawer) {
-                        Icon(Icons.Filled.Menu, contentDescription = "打开菜单")
-                    }
-                },
+            AppTopBar(
+                title = "GitHub 文件",
+                onOpenDrawer = onOpenDrawer,
+                controller = topBarController,
             )
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -148,7 +153,8 @@ fun GithubScreen(
                     onNavigateUp = { viewModel.dispatch(GithubIntent.NavigateUp) },
                     onEnterDir = { path -> viewModel.dispatch(GithubIntent.EnterDirectory(path)) },
                     onDownload = { file ->
-                        pendingDownload = file.name to (file.downloadUrl ?: return@ConnectedContent)
+                        val url = file.downloadUrl ?: return@ConnectedContent
+                        viewModel.rememberPendingDownload(file.name, url)
                         saveLauncher.launch(file.name)
                     },
                 )

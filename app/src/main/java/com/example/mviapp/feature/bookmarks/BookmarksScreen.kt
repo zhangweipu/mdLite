@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteSweep
@@ -32,7 +31,6 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -41,11 +39,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.mviapp.core.bookmark.Bookmark
+import com.example.mviapp.core.ui.AppTopBar
+import com.example.mviapp.core.ui.rememberAppBarScrollController
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -64,6 +65,7 @@ fun BookmarksScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
+    val topBarController = rememberAppBarScrollController()
     var showClearConfirm by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
@@ -76,14 +78,12 @@ fun BookmarksScreen(
     }
 
     Scaffold(
+        modifier = Modifier.nestedScroll(topBarController.nestedScrollConnection),
         topBar = {
-            TopAppBar(
-                title = { Text("收藏夹") },
-                navigationIcon = {
-                    IconButton(onClick = onOpenDrawer) {
-                        Icon(Icons.Filled.Menu, contentDescription = "打开菜单")
-                    }
-                },
+            AppTopBar(
+                title = "收藏夹",
+                onOpenDrawer = onOpenDrawer,
+                controller = topBarController,
                 actions = {
                     if (state.items.isNotEmpty()) {
                         IconButton(onClick = { showClearConfirm = true }) {

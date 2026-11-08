@@ -34,7 +34,6 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Link
-import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Stop
@@ -49,7 +48,6 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -60,6 +58,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -70,6 +69,9 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.mviapp.core.ui.AppTopBar
+import com.example.mviapp.core.ui.ObservableWebView
+import com.example.mviapp.core.ui.rememberAppBarScrollController
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -100,6 +102,7 @@ fun BrowserScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
+    val topBarController = rememberAppBarScrollController()
     val context = LocalContext.current
 
     // WebView 引用与已处理请求 id：用普通持有者而非 mutableStateOf，
@@ -111,8 +114,8 @@ fun BrowserScreen(
     // 页面恢复只做一次，避免 onPageFinished 后重复加载
     val initialLoaded = remember { mutableStateOf(false) }
 
-    // 待下载的文件信息
-    var pendingDownload by remember { mutableStateOf<Pair<String, String>?>(null) }
+    // 待下载信息保存在 ViewModel 的 SavedStateHandle 中（见 rememberPendingDownload），
+    // 系统文件选择器期间 Activity 被回收重建也不会丢失。
     // 地址输入弹窗是否显示
     var showAddressDialog by remember { mutableStateOf(false) }
     // 弹窗中的地址输入（本地状态，确认后才同步到 ViewModel）
@@ -130,11 +133,15 @@ fun BrowserScreen(
     val saveLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/octet-stream"),
     ) { uri ->
-        val pending = pendingDownload
-        pendingDownload = null
+        val pending = viewModel.consumePendingDownload()
         if (uri != null && pending != null) {
             val (url, name) = pending
             viewModel.dispatch(BrowserIntent.ConfirmDownload(url, name, uri))
+        } else if (uri != null) {
+            // 极端情况下（进程被杀且状态未恢复）也要把 SAF 预创建的空文件清掉
+            runCatching {
+                android.provider.DocumentsContract.deleteDocument(context.contentResolver, uri)
+            }
         }
     }
 
@@ -155,7 +162,7 @@ fun BrowserScreen(
                 is BrowserEffect.NavigateToDownloadList -> onNavigateToDownloadList()
                 is BrowserEffect.NavigateToBookmarks -> onNavigateToBookmarks()
                 is BrowserEffect.RequestSaveLocation -> {
-                    pendingDownload = effect.url to effect.fileName
+                    viewModel.rememberPendingDownload(effect.url, effect.fileName)
                     saveLauncher.launch(effect.fileName)
                 }
                 is BrowserEffect.QrResult -> requestLoad(effect.content)
@@ -181,20 +188,12 @@ fun BrowserScreen(
     }
 
     Scaffold(
+        modifier = Modifier.nestedScroll(topBarController.nestedScrollConnection),
         topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        text = state.title.ifBlank { "浏览器" },
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                },
-                navigationIcon = {
-                    IconButton(onClick = onOpenDrawer) {
-                        Icon(Icons.Filled.Menu, contentDescription = "打开菜单")
-                    }
-                },
+            AppTopBar(
+                title = state.title.ifBlank { "浏览器" },
+                onOpenDrawer = onOpenDrawer,
+                controller = topBarController,
                 actions = {
                     IconButton(onClick = { openAddressDialog() }) {
                         Icon(Icons.Filled.Link, contentDescription = "地址")
@@ -252,6 +251,7 @@ fun BrowserScreen(
                 holder = webViewHolder,
                 request = loadRequest,
                 callbacks = callbacks,
+                onWebViewScroll = topBarController::onWebViewScroll,
                 modifier = Modifier.fillMaxSize(),
             )
 
@@ -457,6 +457,7 @@ private fun WebViewContent(
     holder: WebViewHolder,
     request: LoadRequest?,
     callbacks: BrowserWebViewCallbacks,
+    onWebViewScroll: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -479,7 +480,9 @@ private fun WebViewContent(
         factory = { context ->
             // WebView 重建后需要重新处理当前请求
             holder.handledRequestId = -1L
-            WebView(context).apply {
+            ObservableWebView(context).apply {
+                // 原生 WebView 不参与 Compose 嵌套滚动，手动同步滚动位置
+                onScrollYChanged = onWebViewScroll
                 settings.apply {
                     // 基础浏览能力
                     javaScriptEnabled = true

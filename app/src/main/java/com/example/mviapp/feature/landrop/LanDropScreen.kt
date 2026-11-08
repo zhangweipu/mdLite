@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Wifi
@@ -33,7 +32,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -42,11 +40,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.mviapp.core.network.LanDropClient
+import com.example.mviapp.core.ui.AppTopBar
+import com.example.mviapp.core.ui.rememberAppBarScrollController
 
 /**
  * LanDrop 文件下载页
@@ -62,6 +63,7 @@ fun LanDropScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
+    val topBarController = rememberAppBarScrollController()
     var pendingFileName by remember { mutableStateOf<String?>(null) }
 
     // 系统“保存到”选择器：选择保存位置后开始下载
@@ -84,14 +86,12 @@ fun LanDropScreen(
     }
 
     Scaffold(
+        modifier = Modifier.nestedScroll(topBarController.nestedScrollConnection),
         topBar = {
-            TopAppBar(
-                title = { Text("LanDrop 下载") },
-                navigationIcon = {
-                    IconButton(onClick = onOpenDrawer) {
-                        Icon(Icons.Filled.Menu, contentDescription = "打开菜单")
-                    }
-                },
+            AppTopBar(
+                title = "LanDrop 下载",
+                onOpenDrawer = onOpenDrawer,
+                controller = topBarController,
             )
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },

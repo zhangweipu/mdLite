@@ -23,4 +23,19 @@ class FileTypesTest {
         assertTrue("NOTE.TXT".isTxtFile())
         assertFalse("manual.pdfx".isPdfFile())
     }
+
+    @Test
+    fun `detects epub from content uri and percent encoded paths`() {
+        // SAF 返回的 document URI：扩展名藏在编码后的末段
+        assertTrue(
+            ("content://com.android.externalstorage.documents/document/" +
+                "primary%3ABooks%2Fnovel.epub").isEpubFile()
+        )
+        assertTrue("/sdcard/Download/%E4%B8%AD%E6%96%87%E4%B9%A6.EPUB".isEpubFile())
+        assertTrue("novel.epub?x=1".isEpubFile())
+        assertTrue("小说.epub".isSupportedDocFile())
+        assertFalse("novel.epub.bak".isEpubFile())
+        // 纯数字 ID 的 content URI 无法从路径判断，需由调用方用文件名/MIME 兜底
+        assertFalse("content://media/external/file/12345".isEpubFile())
+    }
 }

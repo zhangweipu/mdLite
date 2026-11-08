@@ -8,6 +8,7 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalContext
 
 private val LightColorScheme = lightColorScheme(
@@ -56,11 +57,19 @@ private val DarkColorScheme = darkColorScheme(
 
 @Composable
 fun MviAppTheme(
+    /** 电子墨水屏高对比模式：纯黑白配色 + 加实字重 + 全应用零动画倾向 */
+    eInkMode: Boolean = false,
+    /** WebView 阅读字号倍率，1.0 = 标准 */
+    readerTextScale: Float = 1f,
+    /** 黑白屏把图片转灰度；彩色水墨屏保持 false */
+    monochrome: Boolean = false,
     darkTheme: Boolean = isSystemInDarkTheme(),
     dynamicColor: Boolean = true,
     content: @Composable () -> Unit,
 ) {
     val colorScheme = when {
+        // 墨水屏优先于动态取色与系统深色：彩色/深灰在灰阶屏上都会损失清晰度
+        eInkMode -> EInkColorScheme
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
             val context = LocalContext.current
             if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
@@ -69,9 +78,15 @@ fun MviAppTheme(
         else -> LightColorScheme
     }
 
-    MaterialTheme(
-        colorScheme = colorScheme,
-        typography = AppTypography,
-        content = content,
-    )
+    CompositionLocalProvider(
+        LocalEInkMode provides eInkMode,
+        LocalReaderTextScale provides readerTextScale,
+        LocalEInkMonochrome provides monochrome,
+    ) {
+        MaterialTheme(
+            colorScheme = colorScheme,
+            typography = if (eInkMode) EInkTypography else AppTypography,
+            content = content,
+        )
+    }
 }

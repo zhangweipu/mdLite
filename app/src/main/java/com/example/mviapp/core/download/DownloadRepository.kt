@@ -1,20 +1,29 @@
 package com.example.mviapp.core.download
 
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
+import android.provider.DocumentsContract
+import android.provider.OpenableColumns
+import android.webkit.CookieManager
+import android.webkit.WebSettings
+import com.example.mviapp.di.ApplicationScope
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okio.Buffer
 import okio.buffer
 import okio.sink
-import okio.source
+import java.io.File
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -34,14 +43,20 @@ interface DownloadRepository {
     suspend fun getAll(): List<DownloadItem>
 
     /**
-     * 创建并开始一个下载任务
+     * 创建并开始一个下载任务，**立即返回**，实际下载在应用级作用域继续执行。
      *
      * @param url 下载地址
      * @param fileName 文件名
      * @param destinationUri 本地保存位置
+     * @param referer 触发下载的网页地址（防盗链站点需要）
      * @return 新创建的下载任务
      */
-    suspend fun startDownload(url: String, fileName: String, destinationUri: Uri): DownloadItem
+    suspend fun startDownload(
+        url: String,
+        fileName: String,
+        destinationUri: Uri,
+        referer: String? = null,
+    ): DownloadItem
 
     /** 更新下载进度（内部使用，也暴露给外部自定义下载场景） */
     suspend fun updateProgress(id: String, progress: Int, downloadedSize: Long, totalSize: Long)
@@ -60,15 +75,23 @@ interface DownloadRepository {
 }
 
 /**
- * DownloadRepository 的 OkHttp + SharedPreferences 实现
+ * DownloadRepository 的 OkHttp + SharedPreferences 实现。
  *
- * 使用 OkHttp 执行下载，SharedPreferences 持久化记录。
- * 内存中维护 StateFlow 供 UI 观察。
+ * 修复「下载完是 0 字节」的几处根因：
+ * 1. 旧实现整段下载跑在调用方 ViewModel 的 viewModelScope 里。用户点开下载后
+ *    一旦离开浏览器页（去看下载进度）或旋转屏幕，ViewModel 被清除、协程被取消，
+ *    而 SAF 预创建的空文件已经被 `openOutputStream(uri, "w")` 截断，于是永久留在磁盘上。
+ *    现在下载在 [ApplicationScope] 执行，与页面生命周期解耦。
+ * 2. 旧实现不检查 HTTP 状态、Content-Length、写入字节数，0 字节 / 403 登录页 /
+ *    HTML 错误页都会被标记「已完成」并当成 .epub 打开。
+ * 3. 现在先流式写入应用私有临时文件，[DownloadValidator] 校验通过后才写入用户
+ *    选定的位置；失败时清理 SAF 预创建的 0 字节文件并给出具体原因。
  */
 @Singleton
 class OkHttpDownloadRepository @Inject constructor(
     @ApplicationContext private val context: Context,
     private val okHttpClient: OkHttpClient,
+    @ApplicationScope private val appScope: CoroutineScope,
 ) : DownloadRepository {
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -78,7 +101,6 @@ class OkHttpDownloadRepository @Inject constructor(
     override val downloads: StateFlow<List<DownloadItem>> = _downloads.asStateFlow()
 
     init {
-        // 初始化时加载持久化数据
         _downloads.value = readAll().sortedByDescending { it.createdAt }
     }
 
@@ -90,6 +112,7 @@ class OkHttpDownloadRepository @Inject constructor(
         url: String,
         fileName: String,
         destinationUri: Uri,
+        referer: String?,
     ): DownloadItem {
         val id = UUID.randomUUID().toString()
         val item = DownloadItem(
@@ -101,55 +124,127 @@ class OkHttpDownloadRepository @Inject constructor(
         )
         addItem(item)
 
-        // 在 IO 线程执行下载
-        withContext(Dispatchers.IO) {
-            runCatching {
-                val request = Request.Builder().url(url).build()
-                val response = okHttpClient.newCall(request).execute()
-                val body = response.body ?: error("响应体为空")
-                val totalSize = body.contentLength()
+        // 权限要在下载前持久化：下载中途页面退出/进程重启后，仍需要能打开这个文件。
+        // 旧实现放在下载成功之后，失败时连读权限都没有拿到。
+        persistUriPermission(destinationUri)
 
-                val outputStream = context.contentResolver.openOutputStream(destinationUri, "w")
-                    ?: error("无法打开保存位置")
+        // 不 await：调用方（ViewModel）销毁也不会中断下载。
+        appScope.launch { executeDownload(id, url, fileName, destinationUri, referer) }
+        return item
+    }
 
-                var downloaded = 0L
-                body.source().buffer().use { source ->
-                    outputStream.sink().buffer().use { sink ->
-                        val buffer = okio.Buffer()
+    private suspend fun executeDownload(
+        id: String,
+        url: String,
+        fileName: String,
+        destinationUri: Uri,
+        referer: String?,
+    ) {
+        val partDir = File(context.cacheDir, "downloads").apply { mkdirs() }
+        val part = File(partDir, "$id.part")
+        try {
+            var written = 0L
+            var expected = -1L
+            var contentType: String? = null
+
+            okHttpClient.newCall(buildRequest(url, referer)).execute().use { response ->
+                if (!response.isSuccessful) {
+                    error("HTTP ${response.code}：${response.message}")
+                }
+                val body = response.body ?: error("服务器返回了空响应（无响应体）")
+                expected = body.contentLength()
+                contentType = body.contentType()?.toString()
+
+                body.source().use { source ->
+                    part.outputStream().sink().buffer().use { sink ->
+                        val buffer = Buffer()
+                        var lastPercent = -1
                         while (true) {
-                            val read = source.read(buffer, 8192L)
+                            val read = source.read(buffer, BUFFER_SIZE)
                             if (read == -1L) break
                             sink.write(buffer, read)
-                            downloaded += read
-                            val progress = if (totalSize > 0) (downloaded * 100 / totalSize).toInt() else 0
-                            // 定期更新进度（每 100KB 或完成时）
-                            if (progress != item.progress || read == -1L) {
-                                updateProgress(id, progress, downloaded, totalSize)
+                            written += read
+                            val percent = if (expected > 0) {
+                                (written * 100 / expected).toInt().coerceAtMost(99)
+                            } else 0
+                            if (percent != lastPercent) {
+                                lastPercent = percent
+                                updateProgress(id, percent, written, expected)
                             }
                         }
-                        sink.flush()
                     }
                 }
-                outputStream.close()
-                destinationUri
             }
-                .onSuccess { uri ->
-                    // 持久化保存位置的读写权限
-                    runCatching {
-                        context.contentResolver.takePersistableUriPermission(
-                            uri,
-                            android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
-                                android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
-                        )
-                    }
-                    markCompleted(id, uri.toString())
-                }
-                .onFailure { error ->
-                    markFailed(id, error.message ?: "下载失败")
-                }
-        }
 
-        return item
+            val head = ByteArray(64)
+            val headSize = part.inputStream().use { it.read(head) }.coerceAtLeast(0)
+            val actualHead = if (headSize == head.size) head else head.copyOf(headSize)
+            DownloadValidator.validate(fileName, written, expected, contentType, actualHead)
+                ?.let { error(it) }
+
+            // 只有校验通过才碰用户选定位置，避免把错误页/半个文件写进用户目录。
+            val target = context.contentResolver.openOutputStream(destinationUri, "w")
+                ?: error("无法写入保存位置，请重新选择文件夹")
+            val copied = target.use { out ->
+                part.inputStream().use { input -> input.copyTo(out, BUFFER_SIZE.toInt()) }
+            }
+            if (copied != written) error("写入文件不完整：$copied / $written 字节")
+
+            updateProgress(id, 100, written, written)
+            markCompleted(id, destinationUri.toString())
+        } catch (error: Throwable) {
+            // SAF 在 ACTION_CREATE_DOCUMENT 时会先创建一个 0 字节占位文件，
+            // 下载失败必须把它清掉，否则用户看到的就是「下载了 0b 的文件」。
+            removeEmptyTarget(destinationUri)
+            markFailed(id, error.message?.take(180) ?: "下载失败")
+        } finally {
+            part.delete()
+        }
+    }
+
+    /** 带上与 WebView 一致的请求信息，避免被服务器当作爬虫返回空内容或错误页 */
+    private fun buildRequest(url: String, referer: String?): Request = Request.Builder()
+        .url(url)
+        .header("User-Agent", userAgent())
+        .header("Accept", "*/*")
+        .apply {
+            if (!referer.isNullOrBlank()) header("Referer", referer)
+            webViewCookies(url)?.let { header("Cookie", it) }
+        }
+        .build()
+
+    private fun userAgent(): String = runCatching {
+        WebSettings.getDefaultUserAgent(context)
+    }.getOrDefault(DEFAULT_USER_AGENT)
+
+    /** WebView 的登录 Cookie 默认不与 OkHttp 共享，需要主动透传 */
+    private fun webViewCookies(url: String): String? = runCatching {
+        CookieManager.getInstance().getCookie(url)
+    }.getOrNull()?.takeIf { it.isNotBlank() }
+
+    private fun persistUriPermission(uri: Uri) {
+        if (!uri.scheme.equals("content", ignoreCase = true)) return
+        val resolver = context.contentResolver
+        val both = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        runCatching { resolver.takePersistableUriPermission(uri, both) }
+            .onFailure {
+                // 某些 provider 只授予其中一种权限，分开申请避免整体失败
+                runCatching { resolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+                runCatching { resolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_WRITE_URI_PERMISSION) }
+            }
+    }
+
+    /** 仅删除本次下载留下、且仍为空的占位文件，不误删用户已有的非空文件 */
+    private fun removeEmptyTarget(uri: Uri) {
+        runCatching {
+            if (!uri.scheme.equals("content", ignoreCase = true)) return
+            val size = context.contentResolver.query(
+                uri, arrayOf(OpenableColumns.SIZE), null, null, null,
+            )?.use { cursor ->
+                if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getLong(0) else -1L
+            } ?: -1L
+            if (size == 0L) DocumentsContract.deleteDocument(context.contentResolver, uri)
+        }
     }
 
     override suspend fun updateProgress(id: String, progress: Int, downloadedSize: Long, totalSize: Long) {
@@ -163,7 +258,7 @@ class OkHttpDownloadRepository @Inject constructor(
                 progress = 100,
                 localPath = localPath,
                 completedAt = System.currentTimeMillis(),
-                downloadedSize = it.totalSize.takeIf { s -> s > 0 } ?: it.downloadedSize,
+                downloadedSize = it.totalSize.takeIf { size -> size > 0 } ?: it.downloadedSize,
             )
         }
     }
@@ -213,5 +308,9 @@ class OkHttpDownloadRepository @Inject constructor(
     private companion object {
         const val PREFS_NAME = "download_manager"
         const val KEY_DOWNLOADS = "downloads"
+        const val BUFFER_SIZE = 8192L
+        const val DEFAULT_USER_AGENT =
+            "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) " +
+                "Chrome/120.0.0.0 Mobile Safari/537.36"
     }
 }

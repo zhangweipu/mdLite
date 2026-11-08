@@ -77,6 +77,11 @@ class LanDropClient(private val baseUrl: String) {
                         downloaded += read
                         onProgress(downloaded, total)
                     }
+                    // 0 字节 / 截断的响应不能算成功，否则磁盘上会留下打不开的空文件
+                    if (downloaded == 0L) throw IOException("服务器返回了 0 字节内容，下载未完成")
+                    if (total > 0 && downloaded != total) {
+                        throw IOException("下载不完整：应为 $total 字节，实际 $downloaded 字节")
+                    }
                 }
                 output.flush()
             } finally {

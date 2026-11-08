@@ -40,6 +40,7 @@
                 <data android:mimeType="application/octet-stream" />
                 <data android:mimeType="application/x-markdown" />
                 <data android:mimeType="application/pdf" />
+                <data android:mimeType="application/epub+zip" />
             </intent-filter>
         </activity>
     </application>

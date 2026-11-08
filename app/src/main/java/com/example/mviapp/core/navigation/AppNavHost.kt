@@ -1,7 +1,10 @@
 package com.example.mviapp.core.navigation
 
+import android.content.Context
 import android.net.Uri
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -108,6 +111,9 @@ fun AppNavHost(
         composable(Screen.DownloadList.route) {
             DownloadListScreen(
                 onOpenDrawer = onOpenDrawer,
+                onOpenFile = { path, title ->
+                    navController.navigate(Screen.Reader.buildRoute(path, title))
+                },
             )
         }
 
@@ -172,27 +178,30 @@ fun AppNavHost(
             val fileTitle = title.ifBlank {
                 Uri.decode(filePath).substringAfterLast('/').removeSuffix(".md")
             }
-            // EPUB 文件跳转到专用阅读器
-            if (filePath.isEpubFile()) {
-                EpubReaderScreen(
+            // 文档类型分流：路径 + 文件名 + MIME 三重判断。
+            // SAF 返回的 content URI 可能以数字 ID 结尾（不含扩展名），只看路径会把
+            // EPUB/PDF 误当成 Markdown，用二进制当文本读，表现为「文件打不开」。
+            val context = LocalContext.current
+            val docKind = remember(filePath, fileTitle) {
+                resolveDocKind(context, filePath, fileTitle)
+            }
+            when (docKind) {
+                DocKind.EPUB -> EpubReaderScreen(
                     filePath = filePath,
                     fileTitle = fileTitle,
                     onOpenDrawer = onOpenDrawer,
                 )
-            } else if (filePath.isPdfFile()) {
-                PdfReaderScreen(
+                DocKind.PDF -> PdfReaderScreen(
                     filePath = filePath,
                     fileTitle = fileTitle,
                     onOpenDrawer = onOpenDrawer,
                 )
-            } else if (filePath.isHtmlFile()) {
-                HtmlReaderScreen(
+                DocKind.HTML -> HtmlReaderScreen(
                     filePath = filePath,
                     fileTitle = fileTitle,
                     onOpenDrawer = onOpenDrawer,
                 )
-            } else {
-                MdReaderScreen(
+                else -> MdReaderScreen(
                     filePath = filePath,
                     fileTitle = fileTitle,
                     onOpenDrawer = onOpenDrawer,
@@ -201,3 +210,21 @@ fun AppNavHost(
         }
     }
 }
+
+/** 阅读器页面类型 */
+private enum class DocKind { EPUB, PDF, HTML, TEXT }
+
+/** 文档类型解析：先按路径和文件名，仍无法确定时再查 content provider 的 MIME */
+private fun resolveDocKind(context: Context, path: String, title: String): DocKind = when {
+    path.isEpubFile() || title.isEpubFile() ||
+        isMime(context, path, "application/epub+zip") -> DocKind.EPUB
+    path.isPdfFile() || title.isPdfFile() -> DocKind.PDF
+    path.isHtmlFile() || title.isHtmlFile() -> DocKind.HTML
+    else -> DocKind.TEXT
+}
+
+private fun isMime(context: Context, path: String, expected: String): Boolean =
+    path.startsWith("content://", ignoreCase = true) && runCatching {
+        context.contentResolver.getType(Uri.parse(path))
+            ?.equals(expected, ignoreCase = true) == true
+    }.getOrDefault(false)

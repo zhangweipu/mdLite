@@ -20,7 +20,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.History
-import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Refresh
@@ -42,7 +41,6 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.Button
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -52,10 +50,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.example.mviapp.core.ui.AppTopBar
+import com.example.mviapp.core.ui.rememberAppBarScrollController
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -85,6 +86,8 @@ fun HomeScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
+    // 顶部栏随内容上滑隐藏、下滑显示
+    val topBarController = rememberAppBarScrollController()
     // 读取统一配置，界面尺寸随屏幕分辨率自适应
     val dimens = LocalAppDimens.current
     // 从阅读页返回（或应用回到前台）时自动刷新，保证“最近阅读”记录最新
@@ -105,17 +108,12 @@ fun HomeScreen(
     }
 
     Scaffold(
+        modifier = Modifier.nestedScroll(topBarController.nestedScrollConnection),
         topBar = {
-            TopAppBar(
-                navigationIcon = {
-                    IconButton(onClick = onOpenDrawer) {
-                        Icon(
-                            imageVector = Icons.Default.Menu,
-                            contentDescription = "打开菜单",
-                        )
-                    }
-                },
-                title = { Text(stringResource(R.string.home_title)) },
+            AppTopBar(
+                title = stringResource(R.string.home_title),
+                onOpenDrawer = onOpenDrawer,
+                controller = topBarController,
                 actions = {
                     IconButton(onClick = { viewModel.dispatch(HomeIntent.Refresh) }) {
                         Icon(Icons.Default.Refresh, contentDescription = "刷新")

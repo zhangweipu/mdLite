@@ -3,6 +3,7 @@ package com.example.mviapp.feature.github
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import com.example.mviapp.core.common.isSupportedDocFile
 import com.example.mviapp.core.github.GithubRepository
@@ -24,9 +25,24 @@ class GithubViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val repository: GithubRepository,
     private val historyRepository: ReadingHistoryRepository,
+    private val savedStateHandle: SavedStateHandle,
 ) : MviViewModel<GithubIntent, GithubState, GithubEffect>(
     initialState = GithubState.Idle
 ) {
+
+    /** 系统文件选择器期间 Activity 可能被回收，待下载信息必须跨重建保存 */
+    fun rememberPendingDownload(name: String, url: String) {
+        savedStateHandle[KEY_PENDING_NAME] = name
+        savedStateHandle[KEY_PENDING_URL] = url
+    }
+
+    fun consumePendingDownload(): Pair<String, String>? {
+        val name = savedStateHandle.get<String>(KEY_PENDING_NAME)
+        val url = savedStateHandle.get<String>(KEY_PENDING_URL)
+        savedStateHandle.remove<String>(KEY_PENDING_NAME)
+        savedStateHandle.remove<String>(KEY_PENDING_URL)
+        return if (!name.isNullOrBlank() && !url.isNullOrBlank()) name to url else null
+    }
 
     override suspend fun handleIntent(intent: GithubIntent) {
         when (intent) {
@@ -107,6 +123,13 @@ class GithubViewModel @Inject constructor(
             emitEffect(GithubEffect.ShowToast("请等待当前下载完成"))
             return
         }
+        // 权限在下载前持久化：失败/中途退出后仍能从最近阅读打开
+        runCatching {
+            context.contentResolver.takePersistableUriPermission(
+                destinationUri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+            )
+        }
         viewModelScope.launch {
             updateState { state ->
                 if (state is GithubState.Connected) {
@@ -120,14 +143,6 @@ class GithubViewModel @Inject constructor(
                 }
             }
                 .onSuccess {
-                    // 持久化保存位置的读写权限，之后可在 App 内直接打开
-                    runCatching {
-                        context.contentResolver.takePersistableUriPermission(
-                            destinationUri,
-                            Intent.FLAG_GRANT_READ_URI_PERMISSION or
-                                Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
-                        )
-                    }
                     if (name.isSupportedDocFile()) {
                         historyRepository.add(title = name, source = destinationUri.toString())
                     }
@@ -147,5 +162,10 @@ class GithubViewModel @Inject constructor(
                     emitEffect(GithubEffect.ShowToast("下载失败：${error.message ?: "未知错误"}"))
                 }
         }
+    }
+
+    private companion object {
+        const val KEY_PENDING_NAME = "pending_download_name"
+        const val KEY_PENDING_URL = "pending_download_url"
     }
 }

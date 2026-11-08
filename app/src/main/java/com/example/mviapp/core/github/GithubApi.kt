@@ -3,6 +3,7 @@ package com.example.mviapp.core.github
 import okhttp3.ResponseBody
 import retrofit2.http.GET
 import retrofit2.http.Path
+import retrofit2.http.Streaming
 import retrofit2.http.Url
 
 /**
@@ -35,6 +36,9 @@ interface GithubApi {
      *
      * @param url 文件的 raw/download URL
      */
+    // @Streaming 必需：否则 Retrofit 会把整个文件先读进内存，大文件容易 OOM，
+    // 进程被回收时留下 SAF 预创建的 0 字节文件。
+    @Streaming
     @GET
     suspend fun downloadFile(
         @Url url: String,

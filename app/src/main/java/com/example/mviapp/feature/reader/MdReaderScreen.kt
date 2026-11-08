@@ -1,6 +1,5 @@
 package com.example.mviapp.feature.reader
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,15 +12,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.BookmarkAdd
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material3.AlertDialog
@@ -34,11 +30,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -46,7 +39,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -56,8 +49,10 @@ import com.example.mviapp.core.marks.Bookmark
 import com.example.mviapp.core.marks.ParagraphHighlight
 import com.example.mviapp.core.md.MarkdownContent
 import com.example.mviapp.core.md.MarkdownParser
+import com.example.mviapp.core.ui.AppTopBar
 import com.example.mviapp.core.ui.config.LocalAppDimens
-import kotlinx.coroutines.delay
+import com.example.mviapp.core.ui.rememberAppBarScrollController
+import com.example.mviapp.core.ui.theme.LocalEInkMode
 import kotlinx.coroutines.launch
 
 /**
@@ -74,7 +69,9 @@ fun MdReaderScreen(
     viewModel: MdReaderViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val topBarController = rememberAppBarScrollController()
     val dimens = LocalAppDimens.current
+    val eInkMode = LocalEInkMode.current
     // 内容与滚动状态提升到页面级：顶栏的“添加书签”需要读取当前滚动位置
     val content = (state as? MdReaderState.Success)?.content
     // txt 按行拆成段落保留换行；其余按 Markdown 解析渲染
@@ -92,20 +89,12 @@ fun MdReaderScreen(
     val scope = rememberCoroutineScope()
 
     Scaffold(
+        modifier = Modifier.nestedScroll(topBarController.nestedScrollConnection),
         topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        text = fileTitle,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                },
-                navigationIcon = {
-                    IconButton(onClick = onOpenDrawer) {
-                        Icon(Icons.Filled.Menu, contentDescription = "打开菜单")
-                    }
-                },
+            AppTopBar(
+                title = fileTitle,
+                onOpenDrawer = onOpenDrawer,
+                controller = topBarController,
                 actions = {
                     val success = state as? MdReaderState.Success
                     if (success != null) {
@@ -125,7 +114,7 @@ fun MdReaderScreen(
                         }
                         IconButton(onClick = { showMarks = true }) {
                             Icon(
-                                imageVector = Icons.Filled.List,
+                                imageVector = Icons.AutoMirrored.Filled.List,
                                 contentDescription = "标记列表",
                             )
                         }
@@ -159,43 +148,18 @@ fun MdReaderScreen(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center,
                 ) {
-                    CircularProgressIndicator()
+                    if (eInkMode) {
+                        // 无限旋转的进度动画在刷新慢的水墨屏上会持续留残影
+                        Text(
+                            text = "正在加载…",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    } else {
+                        CircularProgressIndicator()
+                    }
                 }
 
                 is MdReaderState.Success -> {
-                    // 阅读进度：当前可见第一个条目在整篇文档中的位置
-                    val progress by remember(listState) {
-                        derivedStateOf {
-                            val info = listState.layoutInfo
-                            val total = info.totalItemsCount
-                            if (total <= 1) {
-                                0f
-                            } else {
-                                val first = info.visibleItemsInfo.firstOrNull()
-                                if (first == null) {
-                                    0f
-                                } else {
-                                    val itemFraction = if (first.size > 0) {
-                                        first.offset.toFloat() / first.size
-                                    } else {
-                                        0f
-                                    }
-                                    ((first.index + itemFraction) / (total - 1)).coerceIn(0f, 1f)
-                                }
-                            }
-                        }
-                    }
-                    // 滑动时显示进度条，停止滑动 1.2 秒后自动隐藏
-                    var progressVisible by remember { mutableStateOf(false) }
-                    LaunchedEffect(listState.isScrollInProgress) {
-                        if (listState.isScrollInProgress) {
-                            progressVisible = true
-                        } else {
-                            delay(1200)
-                            progressVisible = false
-                        }
-                    }
-
                     // 页面离开时保存阅读位置
                     DisposableEffect(viewModel, listState) {
                         onDispose {
@@ -216,8 +180,8 @@ fun MdReaderScreen(
                         contentPadding = PaddingValues(
                             start = dimens.screenPadding,
                             top = dimens.screenPadding,
-                            // 右边距去掉，内容贴到右边缘
-                            end = 0.dp,
+                            // 进度条已移除，恢复左右对称边距，正文不再贴着屏幕边缘
+                            end = dimens.screenPadding,
                             bottom = dimens.screenPadding,
                         ),
                         listState = listState,
@@ -228,14 +192,6 @@ fun MdReaderScreen(
                             viewModel.dispatch(MdReaderIntent.ToggleHighlight(index, preview))
                         },
                     )
-
-                    // 右侧阅读进度条：仅滑动时显示
-                    if (progressVisible) {
-                        ReadingProgressBar(
-                            progress = progress,
-                            modifier = Modifier.align(Alignment.CenterEnd),
-                        )
-                    }
                 }
 
                 is MdReaderState.Error -> ErrorView(
@@ -359,32 +315,6 @@ private fun MarkRow(
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-    }
-}
-
-/** 右侧阅读进度条：滑动时显示，停止滑动后隐藏 */
-@Composable
-private fun ReadingProgressBar(
-    progress: Float,
-    modifier: Modifier = Modifier,
-) {
-    val scheme = MaterialTheme.colorScheme
-    val shape = CircleShape
-    Box(
-        modifier = modifier
-            .padding(top = 32.dp, bottom = 32.dp, end = 2.dp)
-            .width(4.dp)
-            .fillMaxHeight()
-            .clip(shape)
-            .background(color = scheme.outlineVariant.copy(alpha = 0.5f)),
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .fillMaxHeight(progress.coerceIn(0f, 1f))
-                .align(Alignment.TopCenter)
-                .background(color = scheme.primary),
-        )
     }
 }
 

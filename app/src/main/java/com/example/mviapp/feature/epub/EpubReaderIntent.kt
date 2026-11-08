@@ -7,6 +7,12 @@ sealed interface EpubReaderIntent : MviIntent {
     /** 加载书籍 */
     data object LoadBook : EpubReaderIntent
 
+    /** 重新加载整本书（错误页重试） */
+    data object Retry : EpubReaderIntent
+
+    /** 重新加载当前章节 */
+    data object RetryChapter : EpubReaderIntent
+
     /** 跳转到指定章节 */
     data class JumpToChapter(val index: Int) : EpubReaderIntent
 

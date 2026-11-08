@@ -11,12 +11,16 @@ import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Description
@@ -27,6 +31,8 @@ import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.SdCard
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -35,6 +41,7 @@ import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.NavigationDrawerItemDefaults
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
@@ -43,9 +50,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.mviapp.core.common.isSupportedDocFile
@@ -53,6 +62,9 @@ import com.example.mviapp.core.navigation.AppNavHost
 import com.example.mviapp.core.navigation.Screen
 import com.example.mviapp.core.history.ReadingHistoryRepository
 import com.example.mviapp.core.ui.config.AppLayoutConfig
+import com.example.mviapp.core.ui.display.DisplaySettings
+import com.example.mviapp.core.ui.display.DisplayState
+import com.example.mviapp.core.ui.display.ReaderTextScale
 import com.example.mviapp.core.ui.theme.MviAppTheme
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
@@ -71,6 +83,10 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var historyRepository: ReadingHistoryRepository
 
+    /** 电子墨水屏高对比模式等显示设置 */
+    @Inject
+    lateinit var displaySettings: DisplaySettings
+
     /** 其他应用通过“打开方式”传入的待打开文件 URI（ACTION_VIEW） */
     private var pendingOpenUri by mutableStateOf<Uri?>(null)
         private set
@@ -83,9 +99,14 @@ class MainActivity : ComponentActivity() {
             pendingOpenUri = intent?.data
         }
         setContent {
+            val display by displaySettings.state.collectAsStateWithLifecycle()
             // 统一 UI 配置：根据屏幕分辨率注入对应的尺寸配置
             AppLayoutConfig {
-                MviAppTheme {
+                MviAppTheme(
+                    eInkMode = display.enabled,
+                    readerTextScale = display.textScale.scale,
+                    monochrome = display.monochrome,
+                ) {
                     Surface(modifier = Modifier.fillMaxSize()) {
                         val navController = rememberNavController()
                         val drawerState = rememberDrawerState(DrawerValue.Closed)
@@ -238,6 +259,10 @@ class MainActivity : ComponentActivity() {
                                         scope.launch { drawerState.close() }
                                         navController.navigate(Screen.DownloadList.route)
                                     },
+                                    display = display,
+                                    onEInkToggle = displaySettings::setEnabled,
+                                    onTextScaleChange = displaySettings::setTextScale,
+                                    onMonochromeChange = displaySettings::setMonochrome,
                                 )
                             },
                         ) {
@@ -266,6 +291,7 @@ class MainActivity : ComponentActivity() {
  * - 首页：内置文档与最近阅读
  * - 本机存储 / 内存卡：通过系统选择器授权后浏览文件夹，选择 md 文件
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AppDrawerContent(
     currentRoute: String?,
@@ -277,26 +303,31 @@ private fun AppDrawerContent(
     onGithub: () -> Unit,
     onBrowser: () -> Unit,
     onDownloadList: () -> Unit,
+    display: DisplayState,
+    onEInkToggle: (Boolean) -> Unit,
+    onTextScaleChange: (ReaderTextScale) -> Unit,
+    onMonochromeChange: (Boolean) -> Unit,
 ) {
     ModalDrawerSheet {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 28.dp, vertical = 20.dp),
+                .verticalScroll(rememberScrollState()),
         ) {
-            Text(
-                text = "mdLite",
-                style = MaterialTheme.typography.titleLarge,
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = "Markdown 阅读器",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        HorizontalDivider()
-        Spacer(modifier = Modifier.height(8.dp))
+            Column(modifier = Modifier.padding(horizontal = 28.dp, vertical = 20.dp)) {
+                Text(
+                    text = "mdLite",
+                    style = MaterialTheme.typography.titleLarge,
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Markdown 阅读器",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            HorizontalDivider()
+            Spacer(modifier = Modifier.height(8.dp))
 
         NavigationDrawerItem(
             label = { Text("首页") },
@@ -354,13 +385,98 @@ private fun AppDrawerContent(
             onClick = onBrowser,
             modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
         )
-        NavigationDrawerItem(
-            label = { Text("下载管理") },
-            icon = { Icon(imageVector = Icons.Default.Download, contentDescription = null) },
-            selected = currentRoute == Screen.DownloadList.route,
-            onClick = onDownloadList,
-            modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
+            NavigationDrawerItem(
+                label = { Text("下载管理") },
+                icon = { Icon(imageVector = Icons.Default.Download, contentDescription = null) },
+                selected = currentRoute == Screen.DownloadList.route,
+                onClick = onDownloadList,
+                modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
+            )
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            DisplaySettingsSection(
+                display = display,
+                onEInkToggle = onEInkToggle,
+                onTextScaleChange = onTextScaleChange,
+                onMonochromeChange = onMonochromeChange,
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+    }
+}
+
+/**
+ * 电子墨水屏显示设置。
+ *
+ * 彩色水墨屏的彩色滤光片层分辨率远低于黑白层，文字统一成纯黑后能回到
+ * 300ppi 黑白层，是最直接有效的清晰度提升；图片是否转灰度单独可选。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DisplaySettingsSection(
+    display: DisplayState,
+    onEInkToggle: (Boolean) -> Unit,
+    onTextScaleChange: (ReaderTextScale) -> Unit,
+    onMonochromeChange: (Boolean) -> Unit,
+) {
+    Column(modifier = Modifier.padding(horizontal = 28.dp)) {
+        Text(
+            text = "显示",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        Spacer(modifier = Modifier.height(4.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "电子墨水屏模式",
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+                Text(
+                    text = if (display.isEInkDevice) {
+                        "已识别为墨水屏设备"
+                    } else {
+                        "纯黑文字 · 加实笔画 · 减少残影"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(checked = display.enabled, onCheckedChange = onEInkToggle)
+        }
+
+        if (display.enabled) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "阅读字号",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ReaderTextScale.values().forEach { scale ->
+                    FilterChip(
+                        selected = display.textScale == scale,
+                        onClick = { onTextScaleChange(scale) },
+                        label = { Text(scale.label) },
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "黑白屏（图片转灰度）",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Text(
+                        text = "彩色水墨屏请保持关闭，以保留彩色图片",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(checked = display.monochrome, onCheckedChange = onMonochromeChange)
+            }
+        }
     }
 }
 

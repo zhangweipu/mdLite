@@ -13,3 +13,16 @@ data class EpubBook(
     /** ZIP 根目录（OPF 文件所在目录的相对路径） */
     val rootDir: String,
 )
+
+/**
+ * 一章的渲染数据。
+ *
+ * [baseUrl] 指向该章在缓存目录中的位置，WebView 据此加载书内的图片与 CSS；
+ * 资源尚未解压完成时为空，此时仍能正常显示正文文字。
+ * [fixedLayout] 为固定版式（漫画/画册），WebView 需要整体缩放适配屏宽。
+ */
+data class EpubChapterPage(
+    val html: String,
+    val baseUrl: String?,
+    val fixedLayout: Boolean = false,
+)
