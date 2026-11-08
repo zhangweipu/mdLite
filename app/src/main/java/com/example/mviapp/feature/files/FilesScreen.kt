@@ -19,7 +19,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.MenuBook
@@ -59,7 +59,7 @@ import com.example.mviapp.core.ui.config.LocalAppDimens
 fun FilesScreen(
     onOpenFile: (uri: String, title: String) -> Unit,
     onOpenDirectory: (uri: String) -> Unit,
-    onBack: () -> Unit,
+    onOpenDrawer: () -> Unit,
     viewModel: FilesViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -86,11 +86,8 @@ fun FilesScreen(
                     )
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "返回",
-                        )
+                    IconButton(onClick = onOpenDrawer) {
+                        Icon(Icons.Filled.Menu, contentDescription = "打开菜单")
                     }
                 },
             )

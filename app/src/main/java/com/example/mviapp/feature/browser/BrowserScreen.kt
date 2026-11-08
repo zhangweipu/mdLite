@@ -3,6 +3,7 @@ package com.example.mviapp.feature.browser
 import android.annotation.SuppressLint
 import android.graphics.Bitmap
 import android.net.Uri
+import android.view.View
 import android.webkit.URLUtil
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
@@ -33,6 +34,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Stop
@@ -49,19 +51,26 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * 网页浏览器页面
@@ -72,12 +81,18 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
  * - 收藏夹（添加/取消/管理）
  * - 网页内下载（加入下载管理）
  * - 前进/后退/刷新/停止
- * - 轻量优化：硬件加速、合理缓存、禁用不必要特性
+ *
+ * 流畅性优化（见 [WebViewContent] 与 [BrowserWebViewCallbacks]）：
+ * - WebView 不再强制使用硬件层，交给系统 WebView 自身的渲染管线
+ * - 进度条改为浮层覆盖，加载状态切换不会改变 WebView 高度（避免网页重排）
+ * - WebView 相关参数全部 remember 稳定，页面状态变化不会带着 WebView 一起重组
+ * - 页面回调合并为一次状态更新，并去掉重复值发射
+ * - 离开页面时 destroy WebView，后台时暂停 / 前台时恢复，避免实例堆积
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BrowserScreen(
-    onBack: () -> Unit,
+    onOpenDrawer: () -> Unit,
     onNavigateToDownloadList: () -> Unit,
     onNavigateToBookmarks: () -> Unit,
     initialUrl: String = "",
@@ -85,20 +100,31 @@ fun BrowserScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
-    val context = androidx.compose.ui.platform.LocalContext.current
+    val context = LocalContext.current
 
-    // WebView 引用
-    var webViewRef by remember { mutableStateOf<WebView?>(null) }
-    // 待加载的 URL
-    var pendingUrl by remember { mutableStateOf<String?>(null) }
+    // WebView 引用与已处理请求 id：用普通持有者而非 mutableStateOf，
+    // 避免"拿到 WebView 实例"这种内部事件触发整页重组。
+    val webViewHolder = remember { WebViewHolder() }
+    // 每次加载请求带一个自增 id，因此重复访问同一网址也能正常触发 loadUrl
+    val requestSeq = remember { AtomicLong(0) }
+    var loadRequest by remember { mutableStateOf<LoadRequest?>(null) }
+    // 页面恢复只做一次，避免 onPageFinished 后重复加载
+    val initialLoaded = remember { mutableStateOf(false) }
+
     // 待下载的文件信息
     var pendingDownload by remember { mutableStateOf<Pair<String, String>?>(null) }
-    // 是否已经加载过上次访问的网址
-    var hasLoadedInitial by remember { mutableStateOf(false) }
     // 地址输入弹窗是否显示
     var showAddressDialog by remember { mutableStateOf(false) }
     // 弹窗中的地址输入（本地状态，确认后才同步到 ViewModel）
     var dialogInput by remember { mutableStateOf("") }
+
+    fun requestLoad(url: String) {
+        loadRequest = LoadRequest(url, requestSeq.incrementAndGet())
+    }
+
+    // 所有传给 WebView 的回调合并到一个稳定对象中，
+    // 让 WebViewContent 在 state 变化时可被 Compose 跳过重组。
+    val callbacks = remember(viewModel) { BrowserWebViewCallbacks(viewModel) }
 
     // 系统"保存到"选择器（下载文件）
     val saveLauncher = rememberLauncherForActivityResult(
@@ -132,27 +158,19 @@ fun BrowserScreen(
                     pendingDownload = effect.url to effect.fileName
                     saveLauncher.launch(effect.fileName)
                 }
-                is BrowserEffect.QrResult -> {
-                    // 二维码/粘贴/收藏结果 → 触发 WebView 加载
-                    pendingUrl = effect.content
-                }
-                is BrowserEffect.BookmarkChanged -> {
-                    // 收藏状态变化，图标会通过 state 自动更新
-                }
+                is BrowserEffect.QrResult -> requestLoad(effect.content)
+                is BrowserEffect.BookmarkChanged -> Unit
             }
         }
     }
 
     // 页面首次加载：优先加载传入的 URL，其次加载上次访问的网址
-    LaunchedEffect(state.lastVisitedUrl, initialUrl) {
-        val targetUrl = when {
-            initialUrl.isNotBlank() -> initialUrl
-            !hasLoadedInitial && !state.lastVisitedUrl.isNullOrBlank() -> state.lastVisitedUrl
-            else -> null
-        }
-        if (targetUrl != null && webViewRef?.url == null) {
-            pendingUrl = targetUrl
-            hasLoadedInitial = true
+    LaunchedEffect(state.lastVisitedUrl) {
+        if (initialLoaded.value) return@LaunchedEffect
+        val target = initialUrl.ifBlank { state.lastVisitedUrl.orEmpty() }
+        if (target.isNotBlank()) {
+            initialLoaded.value = true
+            requestLoad(target)
         }
     }
 
@@ -173,8 +191,8 @@ fun BrowserScreen(
                     )
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                    IconButton(onClick = onOpenDrawer) {
+                        Icon(Icons.Filled.Menu, contentDescription = "打开菜单")
                     }
                 },
                 actions = {
@@ -206,14 +224,15 @@ fun BrowserScreen(
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                IconButton(onClick = { webViewRef?.goBack() }, enabled = state.canGoBack) {
+                IconButton(onClick = { webViewHolder.view?.goBack() }, enabled = state.canGoBack) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "后退")
                 }
-                IconButton(onClick = { webViewRef?.goForward() }, enabled = state.canGoForward) {
+                IconButton(onClick = { webViewHolder.view?.goForward() }, enabled = state.canGoForward) {
                     Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "前进")
                 }
                 IconButton(onClick = {
-                    if (state.isLoading) webViewRef?.stopLoading() else webViewRef?.reload()
+                    val view = webViewHolder.view
+                    if (state.isLoading) view?.stopLoading() else view?.reload()
                 }) {
                     Icon(
                         imageVector = if (state.isLoading) Icons.Filled.Stop else Icons.Filled.Refresh,
@@ -223,27 +242,27 @@ fun BrowserScreen(
             }
         },
     ) { padding ->
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding),
         ) {
-            // 加载进度条
-            if (state.isLoading) {
-                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-            }
+            // WebView 始终独占整个可用区域，尺寸从不随加载状态变化。
+            WebViewContent(
+                holder = webViewHolder,
+                request = loadRequest,
+                callbacks = callbacks,
+                modifier = Modifier.fillMaxSize(),
+            )
 
-            // WebView（占满剩余空间）
-            Box(modifier = Modifier.weight(1f)) {
-                WebViewContent(
-                    onWebViewReady = { webViewRef = it },
-                    pendingUrl = pendingUrl,
-                    onUrlLoaded = { pendingUrl = null },
-                    viewModel = viewModel,
-                    onDownloadStart = { url, _, contentDisposition, mimeType, _ ->
-                        val fileName = URLUtil.guessFileName(url, contentDisposition, mimeType)
-                        viewModel.dispatch(BrowserIntent.StartDownload(url, fileName))
-                    },
+            // 进度条以浮层形式盖在 WebView 顶部，而不是作为 Column 的一项。
+            // 之前进度条出现/消失会改变 WebView 高度，触发网页重新布局，
+            // 这是加载瞬间和滚动时最明显的卡顿与跳动来源。
+            if (state.isLoading) {
+                LinearProgressIndicator(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .align(Alignment.TopStart),
                 )
             }
         }
@@ -258,7 +277,7 @@ fun BrowserScreen(
             onConfirm = { input ->
                 val normalized = normalizeUrl(input)
                 viewModel.updateAddressInput(normalized)
-                pendingUrl = normalized
+                requestLoad(normalized)
                 showAddressDialog = false
             },
             onPaste = {
@@ -360,27 +379,106 @@ private fun AddressInputDialog(
     )
 }
 
+/** 一次 URL 加载请求；id 单调递增，保证同一网址也能被重新加载 */
+private data class LoadRequest(val url: String, val id: Long)
+
 /**
- * WebView 内容组件（轻量优化版）
+ * WebView 实例持有者。
  *
- * 针对低配设备的优化：
- * - 启用硬件加速
- * - 合理的缓存策略（优先使用缓存，减少网络请求）
- * - 禁用不必要的插件和自动加载图片（可选，这里保留默认以兼容更多网站）
- * - 禁用文件访问，只允许 content:// 访问
- * - 关闭数据库存储（用缓存即可）
+ * 用普通对象而非 Compose State：UI 只需要调用它的方法，不需要观察它，
+ * 这样 WebView 创建/销毁不会引发任何重组。
+ */
+@Stable
+private class WebViewHolder {
+    var view: WebView? = null
+
+    /** 已交给 WebView 处理的请求 id，避免 update 阶段重复 loadUrl */
+    var handledRequestId: Long = -1L
+}
+
+/**
+ * WebView 回调集合。
+ *
+ * 标记为 [Stable] 并 remember 后，页面状态（标题、进度、收藏…）变化时
+ * [WebViewContent] 的参数保持不变，Compose 可跳过其重组。
+ */
+@Stable
+private class BrowserWebViewCallbacks(private val viewModel: BrowserViewModel) {
+
+    fun onPageStarted(url: String?, view: WebView?) {
+        if (url.isNullOrBlank()) return
+        viewModel.onPageStarted(
+            url,
+            view?.canGoBack() == true,
+            view?.canGoForward() == true,
+        )
+    }
+
+    fun onPageFinished(url: String?, view: WebView?) {
+        if (url.isNullOrBlank()) return
+        viewModel.onPageFinished(
+            url,
+            view?.canGoBack() == true,
+            view?.canGoForward() == true,
+            view?.title,
+        )
+    }
+
+    fun onMainFrameError(message: String?) {
+        viewModel.dispatch(
+            BrowserIntent.PageError(message?.takeIf { it.isNotBlank() } ?: "加载失败")
+        )
+    }
+
+    fun onTitle(title: String?) {
+        if (!title.isNullOrBlank()) viewModel.updateTitle(title)
+    }
+
+    fun onDownload(url: String, contentDisposition: String?, mimeType: String?) {
+        val fileName = URLUtil.guessFileName(url, contentDisposition, mimeType)
+        viewModel.dispatch(BrowserIntent.StartDownload(url, fileName))
+    }
+}
+
+/**
+ * WebView 内容组件
+ *
+ * 关键点：
+ * - 使用默认渲染层（LAYER_TYPE_NONE）。之前强制 LAYER_TYPE_HARDWARE 会让
+ *   WebView 每帧先把整页内容绘制到离屏纹理再合成，滚动时纹理反复上传，
+ *   是中低端设备卡顿的最主要原因。系统 WebView 自身已启用硬件加速。
+ * - 关闭边缘回弹与滚动条，减少过度绘制，也避免与抽屉手势产生视觉/事件冲突。
+ * - [update] 只做一次 id 比较，不写 Compose State，不会引发额外重组。
+ * - [onRelease] 销毁 WebView，反复进出浏览器页不会累积实例与 JS 线程。
  */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 private fun WebViewContent(
-    onWebViewReady: (WebView) -> Unit,
-    pendingUrl: String?,
-    onUrlLoaded: () -> Unit,
-    viewModel: BrowserViewModel,
-    onDownloadStart: (String, String?, String?, String?, Long) -> Unit,
+    holder: WebViewHolder,
+    request: LoadRequest?,
+    callbacks: BrowserWebViewCallbacks,
+    modifier: Modifier = Modifier,
 ) {
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    // 前后台切换时暂停/恢复该 WebView 的 JS 定时器与渲染，
+    // 避免应用退到后台后网页动画继续占用主线程与 GPU。
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> holder.view?.onResume()
+                Lifecycle.Event.ON_PAUSE -> holder.view?.onPause()
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     AndroidView(
         factory = { context ->
+            // WebView 重建后需要重新处理当前请求
+            holder.handledRequestId = -1L
             WebView(context).apply {
                 settings.apply {
                     // 基础浏览能力
@@ -394,9 +492,8 @@ private fun WebViewContent(
                     builtInZoomControls = true
                     displayZoomControls = false
 
-                    // 轻量优化：合理缓存，减少网络消耗
+                    // 标准 HTTP 缓存，减少重复网络请求
                     cacheMode = WebSettings.LOAD_DEFAULT
-                    // 用标准 HTTP 缓存即可（OkHttp 层已处理）
 
                     // 安全：禁用文件访问，只允许 content URI
                     allowFileAccess = false
@@ -405,32 +502,31 @@ private fun WebViewContent(
                     // 媒体：需要用户手势才播放（节省流量和电量）
                     mediaPlaybackRequiresUserGesture = true
 
-                    // 混合内容：兼容模式（低配设备网络不稳时也能加载）
+                    // 混合内容：兼容模式
                     mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
 
-                    // 渲染优化
-                    setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
-
-                    // 字体大小默认（跟随系统设置可能导致布局错乱，保持 100%）
+                    // 字体大小固定，避免跟随系统设置导致布局错乱
                     textZoom = 100
+
+                    // 避免 WebView 首次进入就抢焦点、拉起额外布局
+                    setNeedInitialFocus(false)
+                    javaScriptCanOpenWindowsAutomatically = false
                 }
+
+                // 渲染层交给 WebView 自己管理；强制硬件层会显著降低滚动帧率
+                setLayerType(View.LAYER_TYPE_NONE, null)
+                // 关闭边缘回弹与滚动条：减少过度绘制，也不与抽屉手势互相干扰
+                overScrollMode = View.OVER_SCROLL_NEVER
+                isHorizontalScrollBarEnabled = false
+                isVerticalScrollBarEnabled = false
 
                 webViewClient = object : WebViewClient() {
                     override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-                        url?.let { viewModel.dispatch(BrowserIntent.PageStarted(it)) }
-                        viewModel.updateNavState(
-                            view?.canGoBack() == true,
-                            view?.canGoForward() == true
-                        )
+                        callbacks.onPageStarted(url, view)
                     }
 
                     override fun onPageFinished(view: WebView?, url: String?) {
-                        url?.let { viewModel.dispatch(BrowserIntent.PageFinished(it)) }
-                        viewModel.updateNavState(
-                            view?.canGoBack() == true,
-                            view?.canGoForward() == true
-                        )
-                        view?.title?.let { viewModel.updateTitle(it) }
+                        callbacks.onPageFinished(url, view)
                     }
 
                     override fun onReceivedError(
@@ -439,36 +535,37 @@ private fun WebViewContent(
                         error: WebResourceError?,
                     ) {
                         if (request?.isForMainFrame == true) {
-                            viewModel.dispatch(
-                                BrowserIntent.PageError(
-                                    error?.description?.toString() ?: "加载失败"
-                                )
-                            )
+                            callbacks.onMainFrameError(error?.description?.toString())
                         }
                     }
                 }
 
                 webChromeClient = object : WebChromeClient() {
                     override fun onReceivedTitle(view: WebView?, title: String?) {
-                        title?.let { viewModel.updateTitle(it) }
+                        callbacks.onTitle(title)
                     }
                 }
 
-                setDownloadListener { url, userAgent, contentDisposition, mimeType, contentLength ->
-                    onDownloadStart(url, userAgent, contentDisposition, mimeType, contentLength)
+                setDownloadListener { url, _, contentDisposition, mimeType, _ ->
+                    callbacks.onDownload(url, contentDisposition, mimeType)
                 }
 
-                onWebViewReady(this)
+                holder.view = this
             }
         },
         update = { view ->
-            // 有待加载的 URL 时触发加载
-            val url = pendingUrl
-            if (url != null && url != view.url) {
-                view.loadUrl(url)
-                onUrlLoaded()
+            // 只有在出现新的加载请求时才调用 loadUrl；
+            // 用 id 而不是"url 是否等于 view.url"判断，重复访问同一网址也能生效。
+            if (request != null && request.id != holder.handledRequestId) {
+                holder.handledRequestId = request.id
+                view.loadUrl(request.url)
             }
         },
-        modifier = Modifier.fillMaxSize(),
+        onRelease = { view ->
+            holder.view = null
+            view.stopLoading()
+            view.destroy()
+        },
+        modifier = modifier,
     )
 }

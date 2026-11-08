@@ -45,8 +45,12 @@ class BrowserViewModel @Inject constructor(
         when (intent) {
             is BrowserIntent.LoadUrl -> loadUrl(intent.url)
             is BrowserIntent.SubmitUrl -> submitUrl(intent.input)
-            is BrowserIntent.PageStarted -> onPageStarted(intent.url)
-            is BrowserIntent.PageFinished -> onPageFinished(intent.url)
+            is BrowserIntent.PageStarted -> onPageStarted(
+                intent.url, currentState.canGoBack, currentState.canGoForward
+            )
+            is BrowserIntent.PageFinished -> onPageFinished(
+                intent.url, currentState.canGoBack, currentState.canGoForward, null
+            )
             is BrowserIntent.PageError -> onPageError(intent.message)
             is BrowserIntent.GoBack -> Unit
             is BrowserIntent.GoForward -> Unit
@@ -76,24 +80,6 @@ class BrowserViewModel @Inject constructor(
         }
         val normalized = normalizeUrl(trimmed)
         updateState { it.copy(addressInput = normalized, errorMessage = null) }
-    }
-
-    private fun onPageStarted(url: String) {
-        updateState { it.copy(currentUrl = url, isLoading = true, errorMessage = null) }
-        // 检查收藏状态
-        viewModelScope.launch {
-            val bookmarked = bookmarkRepository.isBookmarked(url)
-            updateState { it.copy(isBookmarked = bookmarked) }
-        }
-    }
-
-    private fun onPageFinished(url: String) {
-        updateState { it.copy(currentUrl = url, isLoading = false) }
-        // 保存上次访问的网址
-        viewModelScope.launch {
-            bookmarkRepository.setLastVisited(url)
-            updateState { it.copy(lastVisitedUrl = url) }
-        }
     }
 
     private fun onPageError(message: String) {
@@ -161,7 +147,10 @@ class BrowserViewModel @Inject constructor(
     private fun checkBookmark(url: String) {
         viewModelScope.launch {
             val bookmarked = bookmarkRepository.isBookmarked(url)
-            updateState { it.copy(isBookmarked = bookmarked) }
+            // 值没变就不发射，避免无意义的重组
+            if (currentState.isBookmarked != bookmarked) {
+                updateState { it.copy(isBookmarked = bookmarked) }
+            }
         }
     }
 
@@ -189,17 +178,87 @@ class BrowserViewModel @Inject constructor(
         }
     }
 
-    // ===== WebView 导航状态同步（由 UI 层调用以更新状态） =====
+    // ===== WebView 回调入口（由 UI 层调用） =====
+
+    /**
+     * 页面开始加载：把 URL、加载态、前进/后退态合并为一次状态更新。
+     *
+     * 之前每个回调会分别 dispatch 多次 Intent，导致一次页面跳转触发 4~6 次
+     * StateFlow 发射，进而让整个 BrowserScreen（含 AndroidView）反复重组，
+     * 这是网页滚动时掉帧的主要来源之一。
+     *
+     * 值未变化时直接返回原 state 实例，StateFlow 不会发射，也不产生重组。
+     */
+    fun onPageStarted(url: String, canGoBack: Boolean, canGoForward: Boolean) {
+        updateState { state ->
+            if (state.currentUrl == url &&
+                state.isLoading &&
+                state.errorMessage == null &&
+                state.canGoBack == canGoBack &&
+                state.canGoForward == canGoForward
+            ) {
+                state
+            } else {
+                state.copy(
+                    currentUrl = url,
+                    isLoading = true,
+                    errorMessage = null,
+                    canGoBack = canGoBack,
+                    canGoForward = canGoForward,
+                )
+            }
+        }
+        checkBookmark(url)
+    }
+
+    /**
+     * 页面加载完成：同样合并为一次状态更新。
+     *
+     * 上次访问地址只写入持久化层，不再回写 UI State——页面恢复只依赖
+     * ViewModel 初始化时读取的那一次，避免加载完成时多一次重组。
+     */
+    fun onPageFinished(
+        url: String,
+        canGoBack: Boolean,
+        canGoForward: Boolean,
+        title: String?,
+    ) {
+        updateState { state ->
+            val newTitle = title?.takeIf { it.isNotBlank() } ?: state.title
+            if (state.currentUrl == url &&
+                !state.isLoading &&
+                state.canGoBack == canGoBack &&
+                state.canGoForward == canGoForward &&
+                state.title == newTitle
+            ) {
+                state
+            } else {
+                state.copy(
+                    currentUrl = url,
+                    isLoading = false,
+                    canGoBack = canGoBack,
+                    canGoForward = canGoForward,
+                    title = newTitle,
+                )
+            }
+        }
+        viewModelScope.launch { bookmarkRepository.setLastVisited(url) }
+    }
 
     fun updateNavState(canGoBack: Boolean, canGoForward: Boolean) {
-        updateState { it.copy(canGoBack = canGoBack, canGoForward = canGoForward) }
+        updateState { state ->
+            if (state.canGoBack == canGoBack && state.canGoForward == canGoForward) state
+            else state.copy(canGoBack = canGoBack, canGoForward = canGoForward)
+        }
     }
 
     fun updateTitle(title: String) {
+        if (title.isBlank() || currentState.title == title) return
         updateState { it.copy(title = title) }
     }
 
     fun updateAddressInput(input: String) {
+        if (currentState.addressInput == input) return
         updateState { it.copy(addressInput = input) }
     }
 }

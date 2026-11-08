@@ -65,21 +65,21 @@ fun AppNavHost(
                 onOpenDirectory = { uri ->
                     navController.navigate(Screen.Files.buildRoute(uri))
                 },
-                onBack = { navController.popBackStack() },
+                onOpenDrawer = onOpenDrawer,
             )
         }
 
         // ====== LanDrop 下载页 ======
         composable(Screen.LanDrop.route) {
             LanDropScreen(
-                onBack = { navController.popBackStack() },
+                onOpenDrawer = onOpenDrawer,
             )
         }
 
         // ====== GitHub 文件页 ======
         composable(Screen.Github.route) {
             GithubScreen(
-                onBack = { navController.popBackStack() },
+                onOpenDrawer = onOpenDrawer,
             )
         }
 
@@ -97,7 +97,7 @@ fun AppNavHost(
                 ?.getString(Screen.Browser.ARG_URL)
                 .orEmpty()
             BrowserScreen(
-                onBack = { navController.popBackStack() },
+                onOpenDrawer = onOpenDrawer,
                 onNavigateToDownloadList = { navController.navigate(Screen.DownloadList.route) },
                 onNavigateToBookmarks = { navController.navigate(Screen.Bookmarks.route) },
                 initialUrl = initialUrl,
@@ -107,14 +107,14 @@ fun AppNavHost(
         // ====== 下载管理 ======
         composable(Screen.DownloadList.route) {
             DownloadListScreen(
-                onBack = { navController.popBackStack() },
+                onOpenDrawer = onOpenDrawer,
             )
         }
 
         // ====== 收藏夹 ======
         composable(Screen.Bookmarks.route) {
             BookmarksScreen(
-                onBack = { navController.popBackStack() },
+                onOpenDrawer = onOpenDrawer,
                 onOpenUrl = { url ->
                     // 从收藏夹打开 → 跳转到浏览器页面并加载该 URL
                     navController.navigate(Screen.Browser.buildRoute(url)) {
@@ -146,7 +146,7 @@ fun AppNavHost(
             EpubReaderScreen(
                 filePath = filePath,
                 fileTitle = title,
-                onBack = { navController.popBackStack() },
+                onOpenDrawer = onOpenDrawer,
             )
         }
 
@@ -177,25 +177,25 @@ fun AppNavHost(
                 EpubReaderScreen(
                     filePath = filePath,
                     fileTitle = fileTitle,
-                    onBack = { navController.popBackStack() },
+                    onOpenDrawer = onOpenDrawer,
                 )
             } else if (filePath.isPdfFile()) {
                 PdfReaderScreen(
                     filePath = filePath,
                     fileTitle = fileTitle,
-                    onBack = { navController.popBackStack() },
+                    onOpenDrawer = onOpenDrawer,
                 )
             } else if (filePath.isHtmlFile()) {
                 HtmlReaderScreen(
                     filePath = filePath,
                     fileTitle = fileTitle,
-                    onBack = { navController.popBackStack() },
+                    onOpenDrawer = onOpenDrawer,
                 )
             } else {
                 MdReaderScreen(
                     filePath = filePath,
                     fileTitle = fileTitle,
-                    onBack = { navController.popBackStack() },
+                    onOpenDrawer = onOpenDrawer,
                 )
             }
         }

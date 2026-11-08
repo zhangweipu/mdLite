@@ -187,8 +187,19 @@ class MainActivity : ComponentActivity() {
                         val currentBackStackEntry by navController.currentBackStackEntryAsState()
                         val currentRoute = currentBackStackEntry?.destination?.route
 
+                        // 全局禁用"边缘滑动划出抽屉"：所有页面统一通过左上角的
+                        // 菜单按钮打开，避免与页面滚动、翻页、WebView 手势相互干扰。
+                        // 抽屉打开时保留手势，确保点击遮罩 / 反向拖动 / 返回键仍能关闭菜单。
+                        val drawerGesturesEnabled = drawerState.currentValue == DrawerValue.Open
+
+                        // 切换页面时收起抽屉，避免抽屉动画与新页面首帧同时渲染。
+                        LaunchedEffect(currentRoute) {
+                            drawerState.close()
+                        }
+
                         ModalNavigationDrawer(
                             drawerState = drawerState,
+                            gesturesEnabled = drawerGesturesEnabled,
                             drawerContent = {
                                 AppDrawerContent(
                                     currentRoute = currentRoute,
@@ -339,7 +350,7 @@ private fun AppDrawerContent(
         NavigationDrawerItem(
             label = { Text("网页浏览器") },
             icon = { Icon(imageVector = Icons.Default.Public, contentDescription = null) },
-            selected = currentRoute == Screen.Browser.route,
+            selected = currentRoute?.startsWith(Screen.Browser.route) == true,
             onClick = onBrowser,
             modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
         )
