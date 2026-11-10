@@ -22,4 +22,8 @@ data class EpubReaderState(
     val chapterError: String? = null,
     /** 是否显示目录弹窗 */
     val showToc: Boolean = false,
+    /** 本次章节加载完成后需要恢复到的章内滚动 Y（0 = 章首） */
+    val restoreScrollY: Int = 0,
+    /** 每次章节加载递增，保证连续两次恢复同一 Y 也能被 UI 感知 */
+    val restoreRequestId: Int = 0,
 ) : MviState

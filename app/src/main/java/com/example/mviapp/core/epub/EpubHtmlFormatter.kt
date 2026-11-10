@@ -44,8 +44,15 @@ object EpubHtmlFormatter {
         val declaredWidth = viewportContents.firstNotNullOfOrNull { content ->
             VIEWPORT_WIDTH.find(content)?.groupValues?.get(1)?.toIntOrNull()
         }
-        val prePaginated = html.contains("pre-paginated", ignoreCase = true)
-        val fixedLayout = prePaginated || (declaredWidth != null && declaredWidth >= FIXED_WIDTH_MIN)
+        // 只认 <meta> 标签里的 pre-paginated 声明；全文 contains 会被
+        // 正文中讨论该概念的文字（如 EPUB 教程章节）误触发
+        val prePaginated = PRE_PAGINATED_META.containsMatchIn(html)
+        val imageDriven = isImageDriven(html)
+        // 只有真正的固定版式（pre-paginated / 漫画画册类图片页）才保留设计宽度；
+        // Markdown 转出的文字书也常带 width=1000 的桌面 viewport，
+        // 那种「伪固定」按流式排版阅读体验才正常
+        val fixedLayout = prePaginated ||
+            (declaredWidth != null && declaredWidth >= FIXED_WIDTH_MIN && imageDriven)
         val fixedWidth = declaredWidth?.takeIf { it >= FIXED_WIDTH_MIN } ?: DEFAULT_FIXED_WIDTH
 
         // 书籍自带的 viewport 是横滑主因，统一换成我们自己的
@@ -61,7 +68,9 @@ object EpubHtmlFormatter {
 
     private fun injectHead(html: String, fixedLayout: Boolean, fixedWidth: Int): String {
         val viewport = if (fixedLayout) {
-            "width=$fixedWidth, initial-scale=1.0, user-scalable=no"
+            // 不写 initial-scale，交给 WebView 的 overview 模式按屏宽整体缩放；
+            // 写死 initial-scale=1.0 会让 overview 失效，设计宽度 1:1 显示被屏幕裁切
+            "width=$fixedWidth, user-scalable=no"
         } else {
             "width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
         }
@@ -228,6 +237,21 @@ object EpubHtmlFormatter {
         }
         $THEME_PLACEHOLDER
     """.trimIndent()
+
+    // ==================== 固定版式识别 ====================
+
+    /**
+     * 是否「图片主导」页面：漫画/画册页几乎只有图片和少量说明文字。
+     * 文本为主的页（即使带 width=1000 的桌面 viewport）必须走流式排版，
+     * 否则整页按设计宽度缩放后字号过小，反而不可读。
+     */
+    private fun isImageDriven(html: String): Boolean {
+        val imgCount = IMG_TAG.findAll(html).count()
+        if (imgCount == 0) return false
+        // style/script 里的内容不是正文，先剔除再去标签
+        val textLength = TAG.replace(STYLE_OR_SCRIPT.replace(html, ""), "").trim().length
+        return textLength < imgCount * IMAGE_TEXT_BUDGET
+    }
 
     // ==================== Markdown 围栏代码块 ====================
 
@@ -407,6 +431,21 @@ object EpubHtmlFormatter {
 
     private const val FIXED_WIDTH_MIN = 600
     private const val DEFAULT_FIXED_WIDTH = 1000
+
+    /** 每张图片允许分摊的正文文本量，超过即视为图文混排页而非图片版式页 */
+    private const val IMAGE_TEXT_BUDGET = 300
+
+    private val IMG_TAG = Regex("""<img\b""", RegexOption.IGNORE_CASE)
+    private val STYLE_OR_SCRIPT = Regex(
+        """<(style|script)\b.*?</\1>""",
+        setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
+    )
+
+    /** EPUB3 固定版式声明：<meta property="rendition:layout" content="pre-paginated">（属性顺序不限） */
+    private val PRE_PAGINATED_META = Regex(
+        """<meta\s[^>]*pre-paginated[^>]*>""",
+        RegexOption.IGNORE_CASE,
+    )
 
     private val HEAD_CLOSE = Regex("</head>", RegexOption.IGNORE_CASE)
     private val VIEWPORT_META = Regex(

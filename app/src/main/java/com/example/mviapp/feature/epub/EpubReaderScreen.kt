@@ -11,6 +11,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.annotation.RequiresApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,6 +22,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -29,6 +31,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -41,15 +44,20 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -61,12 +69,14 @@ import com.example.mviapp.core.epub.EpubChapterPage
 import com.example.mviapp.core.epub.EpubHtmlFormatter
 import com.example.mviapp.core.ui.AppTopBar
 import com.example.mviapp.core.ui.EpubWebView
+import com.example.mviapp.core.ui.display.DisplaySettingsSheet
 import com.example.mviapp.core.ui.display.ReaderDisplayCss
 import com.example.mviapp.core.ui.rememberAppBarScrollController
 import com.example.mviapp.core.ui.theme.LocalEInkMode
 import com.example.mviapp.core.ui.theme.LocalEInkMonochrome
 import com.example.mviapp.core.ui.theme.LocalReaderTextScale
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 
 /**
  * EPUB 阅读器页面。
@@ -87,6 +97,33 @@ fun EpubReaderScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val topBarController = rememberAppBarScrollController()
+    // 点击底部页码直接打开显示设置，阅读时无需先展开抽屉
+    var showDisplaySheet by remember { mutableStateOf(false) }
+
+    // 阅读位置：记录「滚动发生时的章节 + 章内 Y」，滚动停止后节流写盘。
+    // 章节索引用 rememberUpdatedState 读取，保证 WebView 里只赋值一次的滚动回调
+    // 拿到的是事件发生时（而非回调创建时）的章节。
+    val chapterAtScroll = rememberUpdatedState(state.currentChapterIndex)
+    val lastPosition = remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    LaunchedEffect(Unit) {
+        // collectLatest + delay 实现节流：新滚动事件会取消上一次未完成的等待，
+        // 只有停下来超过 800ms 才写盘（避开 FlowPreview 的 debounce）。
+        snapshotFlow { lastPosition.value }
+            .collectLatest { position ->
+                delay(POSITION_SAVE_DEBOUNCE_MS)
+                position?.let { (chapter, y) ->
+                    viewModel.dispatch(EpubReaderIntent.SavePosition(chapter, y))
+                }
+            }
+    }
+    // 返回 / 切到别的页面时立即保存，不必等节流窗口
+    DisposableEffect(viewModel) {
+        onDispose {
+            lastPosition.value?.let { (chapter, y) ->
+                viewModel.dispatch(EpubReaderIntent.SavePosition(chapter, y))
+            }
+        }
+    }
 
     // 墨水屏高对比样式由渲染层替换占位符注入，章节 HTML 缓存不因开关/字号变化而失效
     val eInkMode = LocalEInkMode.current
@@ -133,11 +170,35 @@ fun EpubReaderScreen(
                 ) {
                     Icon(Icons.Filled.ChevronLeft, contentDescription = "上一章")
                 }
-                Text(
-                    text = "${state.currentChapterIndex + 1}/${state.book?.chapters?.size ?: 0}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Box(
+                    modifier = Modifier
+                        .heightIn(min = 40.dp)
+                        .semantics { contentDescription = "显示设置" }
+                        // 墨水屏刷新慢，去掉涟漪动画避免残影
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                        ) {
+                            showDisplaySheet = true
+                        }
+                        .padding(horizontal = 20.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "${state.currentChapterIndex + 1}/${state.book?.chapters?.size ?: 0}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Icon(
+                            imageVector = Icons.Filled.Settings,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(12.dp),
+                        )
+                    }
+                }
                 IconButton(
                     onClick = { viewModel.dispatch(EpubReaderIntent.NextChapter) },
                     enabled = state.book != null &&
@@ -189,8 +250,19 @@ fun EpubReaderScreen(
                     EpubWebView(
                         page = state.page,
                         isLoading = state.isChapterLoading,
-                        onWebViewScroll = topBarController::onWebViewScroll,
+                        onWebViewScroll = { y ->
+                            topBarController.onWebViewScroll(y)
+                            val chapter = chapterAtScroll.value
+                            lastPosition.value = chapter to y
+                            // 同步记进 ViewModel，页面销毁时可作为最后一次位置的兜底
+                            viewModel.onScroll(chapter, y)
+                        },
                         readerCss = readerCss,
+                        restoreScrollY = state.restoreScrollY,
+                        restoreRequestId = state.restoreRequestId,
+                        onRestoreConsumed = {
+                            viewModel.dispatch(EpubReaderIntent.RestoreHandled)
+                        },
                     )
                     if (state.chapterError != null) {
                         Surface(
@@ -239,6 +311,11 @@ fun EpubReaderScreen(
             )
         }
     }
+
+    // 显示设置面板：由底部页码点击触发，抽屉里的「显示设置」入口打开的是同一个面板
+    if (showDisplaySheet) {
+        DisplaySettingsSheet(onDismiss = { showDisplaySheet = false })
+    }
 }
 
 /**
@@ -280,6 +357,9 @@ private fun EpubWebView(
     isLoading: Boolean,
     onWebViewScroll: (Int) -> Unit,
     readerCss: String,
+    restoreScrollY: Int,
+    restoreRequestId: Int,
+    onRestoreConsumed: () -> Unit,
 ) {
     // 墨水屏设备的 WebView 沙箱渲染进程偶发被系统判为「坏进程」：
     // loadData 静默失败、onPageFinished 不回调，界面只剩一片空白且没有任何提示。
@@ -288,14 +368,27 @@ private fun EpubWebView(
     val pageReady = remember { mutableStateOf(false) }
     var generation by remember { mutableStateOf(0) }
 
+    // 打开书时由 ViewModel 指定的恢复位置（书内滚动 Y）
+    val pendingRestore = remember { mutableStateOf(0) }
+    LaunchedEffect(restoreRequestId) {
+        if (restoreRequestId > 0) pendingRestore.value = restoreScrollY
+    }
+
     val reload: () -> Unit = {
         renderFailed.value = false
         pageReady.value = false
         generation++
     }
-    val onPageReady: () -> Unit = {
+    val onPageReady: (WebView) -> Unit = { view ->
         pageReady.value = true
         renderFailed.value = false
+        // 打开书时的持久化位置；同章重灌的位置由 update 直接负责，避免时序竞争
+        val target = pendingRestore.value
+        if (target > 0) {
+            pendingRestore.value = 0
+            onRestoreConsumed()
+            restoreWebViewScroll(view, target, attempt = 0)
+        }
     }
     val onRendererGone: () -> Unit = { renderFailed.value = true }
 
@@ -348,11 +441,19 @@ private fun EpubWebView(
                     }
                 },
                 update = { view ->
+                    view.onScrollYChanged = onWebViewScroll
                     // 结构比较：只有章节或显示配置真的变化时才重新 loadData
                     val config = RenderConfig(page, readerCss)
                     if (view.tag != config) {
                         if (page != null) {
                             pageReady.value = false
+                            val previous = view.tag as? RenderConfig
+                            val sameChapter = previous?.page != null &&
+                                previous.page.chapterIndex == page.chapterIndex &&
+                                page.chapterIndex >= 0
+                            // 同章重灌（资源补齐 / 切字号）保留重灌前的真实滚动位置；
+                            // 翻章或首次加载清掉，由 pendingRestore 决定目标位置。
+                            val keepY = if (sameChapter) view.scrollY else 0
                             // 固定版式书籍保留整页设计宽度，交给 WebView 缩放到屏宽
                             view.settings.loadWithOverviewMode = page.fixedLayout
                             // 墨水屏高对比 CSS 追加在主题 CSS 之后，压过书籍自带配色
@@ -367,6 +468,12 @@ private fun EpubWebView(
                                 "UTF-8",
                                 null,
                             )
+                            // 同章重灌不依赖 onPageFinished：页面把滚动重置回 0 往往晚于
+                            // 回调，因此在 loadData 后直接开始分帧校正。
+                            // 打开书恢复尚未消费时交给 pendingRestore，避免两个目标打架。
+                            if (keepY > 0 && pendingRestore.value <= 0) {
+                                restoreWebViewScroll(view, keepY, attempt = 0)
+                            }
                         }
                         view.tag = config
                     }
@@ -423,6 +530,27 @@ private fun EpubWebView(
 /** 正常加载最多几十毫秒；给墨水屏留足余量，避免慢刷新时误报 */
 private const val RENDER_WATCHDOG_MS = 8_000L
 
+/** 滚动停止后多久写一次阅读位置，避免每帧都写 SharedPreferences */
+private const val POSITION_SAVE_DEBOUNCE_MS = 800L
+
+/**
+ * 页面刚渲染完时，图片 / CSS / 字号变化仍在异步排版，内容高度可能继续变化并把
+ * 滚动位置重置回 0（切换字号尤其明显）。因此在约 700ms 内持续分帧校正：
+ * 每帧只在落后目标时补滚，用户已往下读时不抢滚动。
+ */
+private fun restoreWebViewScroll(view: WebView, target: Int, attempt: Int) {
+    if (attempt > 6) return
+    view.postDelayed({
+        // 只在落后目标时补滚，用户已经往下读时不抢滚动
+        if (view.scrollY < target - 4) {
+            view.scrollTo(0, target)
+        }
+        // 无条件继续检查：首次检查时旧页面可能还停在目标位置，
+        // 内容真正重置要再过几帧，提前结束会把用户留在章首。
+        if (attempt < 6) restoreWebViewScroll(view, target, attempt + 1)
+    }, if (attempt == 0) 0L else 120L)
+}
+
 /**
  * 渲染进程失效时返回 true，表示由页面自行销毁重建 WebView；
  * 返回 false 会让系统直接结束应用进程，用户只会看到应用闪退。
@@ -430,7 +558,7 @@ private const val RENDER_WATCHDOG_MS = 8_000L
 @RequiresApi(Build.VERSION_CODES.O)
 private class EpubWebViewClient(
     private val onRendererGone: () -> Unit,
-    private val onPageReady: () -> Unit,
+    private val onPageReady: (WebView) -> Unit,
 ) : WebViewClient() {
     override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
         onRendererGone()
@@ -439,17 +567,17 @@ private class EpubWebViewClient(
 
     override fun onPageFinished(view: WebView, url: String) {
         super.onPageFinished(view, url)
-        onPageReady()
+        onPageReady(view)
     }
 }
 
 /** API 26 以下没有 onRenderProcessGone，只保留加载完成回调 */
 private class LegacyWebViewClient(
-    private val onPageReady: () -> Unit,
+    private val onPageReady: (WebView) -> Unit,
 ) : WebViewClient() {
     override fun onPageFinished(view: WebView, url: String) {
         super.onPageFinished(view, url)
-        onPageReady()
+        onPageReady(view)
     }
 }
 

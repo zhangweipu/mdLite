@@ -25,4 +25,6 @@ data class EpubChapterPage(
     val html: String,
     val baseUrl: String?,
     val fixedLayout: Boolean = false,
+    /** 所属章节索引：同一章因资源补齐 / 字号切换重灌时据此保留滚动位置 */
+    val chapterIndex: Int = -1,
 )

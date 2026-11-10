@@ -128,6 +128,8 @@ class EpubHtmlFormatterTest {
 
         assertTrue(result.fixedLayout)
         assertTrue(result.html.contains("width=1200"))
+        // initial-scale=1.0 会让 overview 缩放失效，设计宽度 1:1 显示被屏幕裁切
+        assertFalse(result.html.contains("initial-scale"))
         assertFalse(result.html.contains("body *"))
         assertEquals(1, Regex("name=\"viewport\"").findAll(result.html).count())
     }
@@ -137,6 +139,49 @@ class EpubHtmlFormatterTest {
         val raw = """
             <html><head><meta property="rendition:layout" content="pre-paginated"></head>
             <body>x</body></html>
+        """.trimIndent()
+
+        val result = EpubHtmlFormatter.format(raw, "page1.xhtml")
+
+        assertTrue(result.fixedLayout)
+        assertTrue(result.html.contains("width=1000"))
+    }
+
+    @Test
+    fun `plain text mentioning pre-paginated does not trigger fixed layout`() {
+        // EPUB 教程正文中讨论 "pre-paginated" 概念，全文 contains 会误判整章为固定版式
+        val raw = """
+            <html><head></head>
+            <body><p>固定版式（pre-paginated）的电子书每一页都是设计好的。</p></body></html>
+        """.trimIndent()
+
+        val result = EpubHtmlFormatter.format(raw, chapter)
+
+        assertFalse(result.fixedLayout)
+        assertTrue(result.html.contains("width=device-width"))
+    }
+
+    @Test
+    fun `text heavy page with desktop viewport stays reflowable`() {
+        // Markdown 转出的文字书常带 width=1000 的桌面 viewport，
+        // 误判成固定版式会按 1000px 布局且不缩放，正文被屏幕裁切
+        val raw = """
+            <html><head><meta name="viewport" content="width=1000"/></head>
+            <body><h1>第 4 章</h1><p>这一章是全项目技术密度最高的部分。</p></body></html>
+        """.trimIndent()
+
+        val result = EpubHtmlFormatter.format(raw, chapter)
+
+        assertFalse(result.fixedLayout)
+        assertTrue(result.html.contains("width=device-width"))
+        assertFalse(result.html.contains("width=1000"))
+    }
+
+    @Test
+    fun `image driven page with desktop viewport keeps fixed layout`() {
+        val raw = """
+            <html><head><meta name="viewport" content="width=1000"/></head>
+            <body><img src="page1.jpg"><img src="page2.jpg"><p>第 1 页</p></body></html>
         """.trimIndent()
 
         val result = EpubHtmlFormatter.format(raw, "page1.xhtml")
@@ -219,7 +264,10 @@ class EpubHtmlFormatterTest {
 
     @Test
     fun `fixed layout keeps monospace but does not force code wrapping`() {
-        val raw = """<html><head><meta name="viewport" content="width=1200"/></head><body><pre>code</pre></body></html>"""
+        val raw = """
+            <html><head><meta property="rendition:layout" content="pre-paginated"/></head>
+            <body><pre>code</pre></body></html>
+        """.trimIndent()
 
         val html = EpubHtmlFormatter.format(raw, "page1.xhtml").html
 
@@ -321,13 +369,15 @@ class EpubHtmlFormatterTest {
 
     @Test
     fun `handles single quoted and self closing viewport meta`() {
+        // 大写属性 + 单引号 + 自闭合的 viewport 也要能识别并摘除；
+        // 页面只有文字没有图片，属于伪固定，必须走流式
         val raw = """<html><head><META NAME="viewport" CONTENT='width=980'/></head><body>x</body></html>"""
 
         val result = EpubHtmlFormatter.format(raw, chapter)
 
-        assertTrue(result.fixedLayout)
-        assertTrue(result.html.contains("width=980"))
-        assertEquals(1, Regex("name=\"viewport\"", RegexOption.IGNORE_CASE).findAll(result.html).count())
+        assertFalse(result.fixedLayout)
+        assertFalse(result.html.contains("980"))
+        assertTrue(result.html.contains("width=device-width"))
     }
 
     @Test

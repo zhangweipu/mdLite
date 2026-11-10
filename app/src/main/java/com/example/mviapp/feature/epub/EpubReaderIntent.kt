@@ -27,4 +27,10 @@ sealed interface EpubReaderIntent : MviIntent {
 
     /** 关闭目录 */
     data object CloseToc : EpubReaderIntent
+
+    /** 保存阅读位置；chapterIndex 用于丢弃翻章后才到达的延迟滚动事件 */
+    data class SavePosition(val chapterIndex: Int, val scrollY: Int) : EpubReaderIntent
+
+    /** UI 已完成滚动恢复，清掉待恢复位置 */
+    data object RestoreHandled : EpubReaderIntent
 }

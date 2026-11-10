@@ -11,9 +11,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -29,10 +27,10 @@ import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.SdCard
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -41,16 +39,15 @@ import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.NavigationDrawerItemDefaults
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -63,8 +60,7 @@ import com.example.mviapp.core.navigation.Screen
 import com.example.mviapp.core.history.ReadingHistoryRepository
 import com.example.mviapp.core.ui.config.AppLayoutConfig
 import com.example.mviapp.core.ui.display.DisplaySettings
-import com.example.mviapp.core.ui.display.DisplayState
-import com.example.mviapp.core.ui.display.ReaderTextScale
+import com.example.mviapp.core.ui.display.DisplaySettingsSheet
 import com.example.mviapp.core.ui.theme.MviAppTheme
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
@@ -112,6 +108,8 @@ class MainActivity : ComponentActivity() {
                         val drawerState = rememberDrawerState(DrawerValue.Closed)
                         val scope = rememberCoroutineScope()
                         val context = LocalContext.current
+                        // 显示设置面板：抽屉入口与阅读页底部页码点击共用
+                        var showDisplaySheet by remember { mutableStateOf(false) }
 
                         // 系统文件夹选择器：本机存储 / 内存卡都由此授权并浏览
                         val folderPicker = rememberLauncherForActivityResult(
@@ -259,10 +257,10 @@ class MainActivity : ComponentActivity() {
                                         scope.launch { drawerState.close() }
                                         navController.navigate(Screen.DownloadList.route)
                                     },
-                                    display = display,
-                                    onEInkToggle = displaySettings::setEnabled,
-                                    onTextScaleChange = displaySettings::setTextScale,
-                                    onMonochromeChange = displaySettings::setMonochrome,
+                                    onDisplaySettingsClick = {
+                                        scope.launch { drawerState.close() }
+                                        showDisplaySheet = true
+                                    },
                                 )
                             },
                         ) {
@@ -270,6 +268,12 @@ class MainActivity : ComponentActivity() {
                                 navController = navController,
                                 onOpenDrawer = { scope.launch { drawerState.open() } },
                             )
+                        }
+
+                        // 抽屉里的「显示设置」入口打开同一个面板；
+                        // EPUB 阅读页则直接点击底部页码打开，不必先展开抽屉。
+                        if (showDisplaySheet) {
+                            DisplaySettingsSheet(onDismiss = { showDisplaySheet = false })
                         }
                     }
                 }
@@ -303,10 +307,7 @@ private fun AppDrawerContent(
     onGithub: () -> Unit,
     onBrowser: () -> Unit,
     onDownloadList: () -> Unit,
-    display: DisplayState,
-    onEInkToggle: (Boolean) -> Unit,
-    onTextScaleChange: (ReaderTextScale) -> Unit,
-    onMonochromeChange: (Boolean) -> Unit,
+    onDisplaySettingsClick: () -> Unit,
 ) {
     ModalDrawerSheet {
         Column(
@@ -394,88 +395,16 @@ private fun AppDrawerContent(
             )
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-            DisplaySettingsSection(
-                display = display,
-                onEInkToggle = onEInkToggle,
-                onTextScaleChange = onTextScaleChange,
-                onMonochromeChange = onMonochromeChange,
+            // 设置面板本体已移到「点击底部页码」弹出的底部弹窗，这里只保留一个入口，
+            // 保证 MD / PDF / HTML 等没有底部页码的页面仍能调整显示参数。
+            NavigationDrawerItem(
+                label = { Text("显示设置") },
+                icon = { Icon(Icons.Filled.Settings, contentDescription = null) },
+                selected = false,
+                onClick = onDisplaySettingsClick,
+                modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
             )
             Spacer(modifier = Modifier.height(16.dp))
-        }
-    }
-}
-
-/**
- * 电子墨水屏显示设置。
- *
- * 彩色水墨屏的彩色滤光片层分辨率远低于黑白层，文字统一成纯黑后能回到
- * 300ppi 黑白层，是最直接有效的清晰度提升；图片是否转灰度单独可选。
- */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun DisplaySettingsSection(
-    display: DisplayState,
-    onEInkToggle: (Boolean) -> Unit,
-    onTextScaleChange: (ReaderTextScale) -> Unit,
-    onMonochromeChange: (Boolean) -> Unit,
-) {
-    Column(modifier = Modifier.padding(horizontal = 28.dp)) {
-        Text(
-            text = "显示",
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(modifier = Modifier.height(4.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "电子墨水屏模式",
-                    style = MaterialTheme.typography.bodyLarge,
-                )
-                Text(
-                    text = if (display.isEInkDevice) {
-                        "已识别为墨水屏设备"
-                    } else {
-                        "纯黑文字 · 加实笔画 · 减少残影"
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Switch(checked = display.enabled, onCheckedChange = onEInkToggle)
-        }
-
-        if (display.enabled) {
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = "阅读字号",
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                ReaderTextScale.values().forEach { scale ->
-                    FilterChip(
-                        selected = display.textScale == scale,
-                        onClick = { onTextScaleChange(scale) },
-                        label = { Text(scale.label) },
-                    )
-                }
-            }
-            Spacer(modifier = Modifier.height(8.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "黑白屏（图片转灰度）",
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    Text(
-                        text = "彩色水墨屏请保持关闭，以保留彩色图片",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Switch(checked = display.monochrome, onCheckedChange = onMonochromeChange)
-            }
         }
     }
 }
